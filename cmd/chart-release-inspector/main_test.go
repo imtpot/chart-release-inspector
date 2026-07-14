@@ -48,7 +48,7 @@ func TestPrintUsageListsCommands(t *testing.T) {
 	if _, err := output.ReadFrom(temporaryFile); err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"inspect", "config validate", "version"} {
+	for _, command := range []string{"inspect", "batch", "config validate", "version"} {
 		if !bytes.Contains(output.Bytes(), []byte(command)) {
 			t.Fatalf("usage output does not contain %q: %s", command, output.String())
 		}

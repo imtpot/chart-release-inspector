@@ -106,6 +106,49 @@ func TestLoadReleaseNotesConfigValidatesAndMatchesChart(t *testing.T) {
 	}
 }
 
+func TestLoadBatchManifestRejectsUnknownFields(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "charts.yaml")
+	contents := "charts:\n  - chart: example\n    current_version: 1.0.0\n    unsupported: true\n"
+	if err := os.WriteFile(filename, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadBatchManifest(filename); err == nil || !strings.Contains(err.Error(), "field unsupported") {
+		t.Fatalf("LoadBatchManifest() error = %v, want unknown field error", err)
+	}
+}
+
+func TestInspectBatchAggregatesResultsInManifestOrder(t *testing.T) {
+	archives := map[string][]byte{
+		"example-1.0.0.tgz": chartFixture(t, "example", "1.0.0", "v1.0.0", "enabled: false\n"),
+		"example-1.1.0.tgz": chartFixture(t, "example", "1.1.0", "v1.1.0", "enabled: true\n"),
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/index.yaml" {
+			fmt.Fprint(writer, "apiVersion: v1\nentries:\n  example:\n    - name: example\n      version: 1.1.0\n      appVersion: v1.1.0\n      urls: [example-1.1.0.tgz]\n    - name: example\n      version: 1.0.0\n      appVersion: v1.0.0\n      urls: [example-1.0.0.tgz]\n")
+			return
+		}
+		archive, found := archives[request.URL.Path[1:]]
+		if !found {
+			http.NotFound(writer, request)
+			return
+		}
+		writer.Write(archive)
+	}))
+	defer server.Close()
+
+	result := InspectBatch(t.Context(), BatchManifest{Charts: []BatchChart{
+		{Chart: "example", Repository: server.URL, CurrentVersion: "1.0.0"},
+		{Chart: "", CurrentVersion: "1.0.0"},
+	}}, ReleaseNotesConfig{}, 2000)
+
+	if result.SchemaVersion != BatchSchemaVersion || result.Status != StatusError {
+		t.Fatalf("InspectBatch() contract = %#v", result)
+	}
+	if len(result.Results) != 2 || result.Results[0].Status != StatusUpdate || result.Results[1].Status != StatusError {
+		t.Fatalf("InspectBatch() results = %#v", result.Results)
+	}
+}
+
 func TestGitHubReleaseNotesTraversesMatchingIntermediateVersions(t *testing.T) {
 	originalAPIBase := githubAPIBase
 	t.Cleanup(func() { githubAPIBase = originalAPIBase })

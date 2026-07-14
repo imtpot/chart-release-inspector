@@ -1,0 +1,7 @@
+charts:
+  - chart: external-secrets
+    repository: https://charts.external-secrets.io
+    current_version: 2.7.0
+    values_diff: true
+  - chart: oci://ghcr.io/grafana/helm-charts/grafana
+    current_version: 10.5.14

@@ -65,18 +65,48 @@ Inspect an OCI chart. OCI references include their registry, so
 ```sh
 chart-release-inspector inspect \
   --chart oci://ghcr.io/grafana/helm-charts/grafana \
-  --current-version 12.4.5 \
+  --current-version 10.5.14 \
   --output json
 ```
 
 When `--target-version` is omitted, the inspector selects the newest available
 stable chart version. Pass `--target-version` to inspect a specific release.
 
+## Batch Checks
+
+Run a manifest of independent chart checks and receive one JSON report:
+
+```sh
+chart-release-inspector batch --file charts.yaml > report.json
+```
+
+```yaml
+charts:
+  - chart: external-secrets
+    repository: https://charts.external-secrets.io
+    current_version: 2.7.0
+    values_diff: true
+  - chart: oci://ghcr.io/grafana/helm-charts/grafana
+    current_version: 10.5.14
+```
+
+Each `results` entry has the same schema as `inspect`. Checks run in manifest
+order; an error for one chart does not prevent the remaining charts from being
+inspected. Batch exits with `0` when every chart is current, `10` when at least
+one update is available and no chart failed, or `20` when any chart failed.
+Batch always writes its JSON report to stdout, so it can be redirected to a file
+or piped to another command.
+
+Use `--release-notes-config` and `--release-note-limit` with `batch` to apply
+the same optional GitHub release-note rules as an individual inspection. See
+[`charts.example.yaml`](charts.example.yaml) for a ready-to-run manifest.
+
 ## Command Reference
 
 ```text
 chart-release-inspector inspect [flags]
 chart-release-inspector config validate <release-notes.yaml>
+chart-release-inspector batch --file charts.yaml
 chart-release-inspector version
 ```
 

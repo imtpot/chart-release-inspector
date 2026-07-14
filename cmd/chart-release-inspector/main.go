@@ -29,6 +29,8 @@ func main() {
 	switch os.Args[1] {
 	case "inspect":
 		inspect(os.Args[2:])
+	case "batch":
+		batch(os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	case "config":
@@ -76,9 +78,7 @@ func inspect(args []string) {
 	}
 	result := inspector.Inspect(context.Background(), input)
 	if *output == "json" {
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		if err := encoder.Encode(result); err != nil {
+		if err := writeJSON(result); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -94,6 +94,58 @@ func inspect(args []string) {
 	}
 	render.Warning(os.Stderr, result.ReleaseNotesError, color)
 	os.Exit(exitCode(result))
+}
+
+func batch(args []string) {
+	flags := flag.NewFlagSet("batch", flag.ExitOnError)
+	filename := flags.String("file", "", "YAML batch manifest")
+	releaseNoteLimit := flags.Int("release-note-limit", 2000, "maximum release-note characters; 0 keeps the complete body")
+	releaseNotesConfig := flags.String("release-notes-config", "", "YAML file with chart-specific upstream release rules")
+	_ = flags.Parse(args)
+
+	if *filename == "" {
+		writeBatchError("--file is required")
+		return
+	}
+	manifest, err := inspector.LoadBatchManifest(*filename)
+	if err != nil {
+		writeBatchError(err.Error())
+		return
+	}
+	config := inspector.ReleaseNotesConfig{}
+	if *releaseNotesConfig != "" {
+		config, err = inspector.LoadReleaseNotesConfig(*releaseNotesConfig)
+		if err != nil {
+			writeBatchError(err.Error())
+			return
+		}
+	}
+	result := inspector.InspectBatch(context.Background(), manifest, config, *releaseNoteLimit)
+	if err := writeJSON(result); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(exitCodeForStatus(result.Status))
+}
+
+func writeBatchError(message string) {
+	result := inspector.BatchResult{
+		SchemaVersion: inspector.BatchSchemaVersion,
+		Status:        inspector.StatusError,
+		Error:         message,
+		Results:       []inspector.Result{},
+	}
+	if err := writeJSON(result); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(exitError)
+}
+
+func writeJSON(value any) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
 }
 
 func validateConfig(args []string) {
@@ -120,6 +172,7 @@ func validateConfigFile(filename string) (int, error) {
 func printUsage(writer *os.File) {
 	fmt.Fprintln(writer, "usage:")
 	fmt.Fprintln(writer, "  chart-release-inspector inspect [flags]")
+	fmt.Fprintln(writer, "  chart-release-inspector batch --file charts.yaml")
 	fmt.Fprintln(writer, "  chart-release-inspector config validate <release-notes.yaml>")
 	fmt.Fprintln(writer, "  chart-release-inspector version")
 }
@@ -153,7 +206,11 @@ func terminalWidth() int {
 }
 
 func exitCode(result inspector.Result) int {
-	switch result.Status {
+	return exitCodeForStatus(result.Status)
+}
+
+func exitCodeForStatus(status string) int {
+	switch status {
 	case inspector.StatusCurrent:
 		return exitCurrent
 	case inspector.StatusUpdate:
