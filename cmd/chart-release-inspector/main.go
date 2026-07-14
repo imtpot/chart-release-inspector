@@ -19,11 +19,27 @@ const (
 	exitError           = 20
 )
 
+var version = "dev"
+
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "inspect" {
-		fmt.Fprintln(os.Stderr, "usage: chart-release-inspector inspect [flags]")
+	if len(os.Args) < 2 {
+		printUsage(os.Stderr)
 		os.Exit(2)
 	}
+	switch os.Args[1] {
+	case "inspect":
+		inspect(os.Args[2:])
+	case "version":
+		fmt.Println(version)
+	case "config":
+		validateConfig(os.Args[2:])
+	default:
+		printUsage(os.Stderr)
+		os.Exit(2)
+	}
+}
+
+func inspect(args []string) {
 	flags := flag.NewFlagSet("inspect", flag.ExitOnError)
 	chart := flags.String("chart", "", "Helm chart name or oci:// reference")
 	repository := flags.String("repository", "", "Helm repository URL")
@@ -34,7 +50,7 @@ func main() {
 	releaseNotesConfig := flags.String("release-notes-config", "", "YAML file with chart-specific upstream release rules")
 	output := flags.String("output", "terminal", "output format: terminal or json")
 	colorMode := flags.String("color", "auto", "color mode: auto, always, or never")
-	_ = flags.Parse(os.Args[2:])
+	_ = flags.Parse(args)
 
 	input := inspector.Input{
 		Chart: *chart, Repository: *repository, CurrentVersion: *currentVersion,
@@ -78,6 +94,34 @@ func main() {
 	}
 	render.Warning(os.Stderr, result.ReleaseNotesError, color)
 	os.Exit(exitCode(result))
+}
+
+func validateConfig(args []string) {
+	if len(args) != 2 || args[0] != "validate" {
+		fmt.Fprintln(os.Stderr, "usage: chart-release-inspector config validate <release-notes.yaml>")
+		os.Exit(2)
+	}
+	ruleCount, err := validateConfigFile(args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(exitError)
+	}
+	fmt.Printf("valid release notes config: %d rule(s)\n", ruleCount)
+}
+
+func validateConfigFile(filename string) (int, error) {
+	config, err := inspector.LoadReleaseNotesConfig(filename)
+	if err != nil {
+		return 0, err
+	}
+	return len(config.Rules), nil
+}
+
+func printUsage(writer *os.File) {
+	fmt.Fprintln(writer, "usage:")
+	fmt.Fprintln(writer, "  chart-release-inspector inspect [flags]")
+	fmt.Fprintln(writer, "  chart-release-inspector config validate <release-notes.yaml>")
+	fmt.Fprintln(writer, "  chart-release-inspector version")
 }
 
 func validOutput(output string) bool {

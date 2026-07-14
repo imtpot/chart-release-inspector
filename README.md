@@ -52,6 +52,8 @@ stable chart version. Pass `--target-version` to inspect a specific release.
 
 ```text
 chart-release-inspector inspect [flags]
+chart-release-inspector config validate <release-notes.yaml>
+chart-release-inspector version
 ```
 
 | Flag | Description |
@@ -68,6 +70,9 @@ chart-release-inspector inspect [flags]
 
 Terminal output uses PTerm and follows `NO_COLOR`. JSON output contains no
 terminal formatting.
+
+`config validate` checks a release-notes configuration without contacting Helm
+or GitHub. `version` prints the binary version; development builds report `dev`.
 
 ## Automation Contract
 

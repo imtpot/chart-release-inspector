@@ -11,6 +11,8 @@ builds:
   - id: chart-release-inspector
     main: ./cmd/chart-release-inspector
     binary: chart-release-inspector
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
     env:
       - CGO_ENABLED=0
     goos:
