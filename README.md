@@ -16,6 +16,30 @@ or newer:
 go install github.com/imtpot/chart-release-inspector/cmd/chart-release-inspector@latest
 ```
 
+### mise
+
+Add the pinned GitHub release to a project `mise.toml`:
+
+```toml
+[tools]
+"github:imtpot/chart-release-inspector" = "0.1.0"
+```
+
+Install and use it:
+
+```sh
+mise install
+mise exec -- chart-release-inspector version
+```
+
+mise may hide a newly published release until it reaches its configured minimum
+release age. To install a specific new version intentionally, use a one-time
+override:
+
+```sh
+mise install --minimum-release-age 0d github:imtpot/chart-release-inspector@0.1.0
+```
+
 To build from a checkout:
 
 ```sh
