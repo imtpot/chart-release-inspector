@@ -57,7 +57,7 @@ func TestPrintUsageListsCommands(t *testing.T) {
 
 func TestValidateConfigFile(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "release-notes.yaml")
-	contents := "rules:\n  - chart: example\n    provider: github\n    repository: example/project\n"
+	contents := "rules:\n  - chart: example\n    provider: github\n    repository: https://github.com/example/project\n"
 	if err := os.WriteFile(filename, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}

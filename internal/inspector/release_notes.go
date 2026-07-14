@@ -54,6 +54,12 @@ func LoadReleaseNotesConfig(filename string) (ReleaseNotesConfig, error) {
 		if rule.Provider == "github" && rule.Repository == "" {
 			return ReleaseNotesConfig{}, fmt.Errorf("GitHub release note rule for %q is missing repository", rule.Chart)
 		}
+		if rule.Repository != "" && githubRepository(rule.Repository) == "" {
+			return ReleaseNotesConfig{}, fmt.Errorf(
+				"release note repository for %q must be a full GitHub URL",
+				rule.Chart,
+			)
+		}
 		if rule.Version != "" && rule.Version != "application" && rule.Version != "chart" {
 			return ReleaseNotesConfig{}, fmt.Errorf("release note rule for %q has invalid version type %q", rule.Chart, rule.Version)
 		}
@@ -92,7 +98,7 @@ func githubReleaseNotes(
 		return []ReleaseNote{}, ""
 	}
 	if rule.Repository != "" {
-		source = "https://github.com/" + rule.Repository
+		source = rule.Repository
 	}
 	repository := githubRepository(source)
 	if repository == "" {

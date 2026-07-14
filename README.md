@@ -137,11 +137,12 @@ source:
 
 ```yaml
 rules:
+  # Match the Helm chart name, not the upstream application name.
   - chart: ingress-nginx
-    provider: github
-    repository: kubernetes/ingress-nginx
+    # GitHub repository with the upstream release notes.
+    repository: https://github.com/kubernetes/ingress-nginx
+    # Upstream release tags are controller-v1.14.0, not v1.14.0.
     tag_template: controller-v{version}
-    version: application
 ```
 
 Use the configuration with either `inspect` or `batch`:
@@ -153,8 +154,11 @@ chart-release-inspector batch \
   --release-note-limit 2000 > report.json
 ```
 
-`version` defaults to `application`; set it to `chart` for projects that publish
-chart-version release notes. Validate configuration without any network calls:
+`repository` must be a full GitHub URL. `version` defaults to `application`; set
+it to `chart` for projects that publish chart-version release notes. `provider:
+github` is optional because GitHub is the default lookup; use `provider: none`
+to disable release notes for a chart. Validate configuration without any network
+calls:
 
 ```sh
 chart-release-inspector config validate release-notes.yaml

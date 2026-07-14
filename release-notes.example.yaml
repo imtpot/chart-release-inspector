@@ -1,11 +1,7 @@
 rules:
   - chart: external-secrets
-    provider: github
-    repository: external-secrets/external-secrets
+    repository: https://github.com/external-secrets/external-secrets
     tag_template: v{version}
-    version: application
   - chart: ingress-nginx
-    provider: github
-    repository: kubernetes/ingress-nginx
+    repository: https://github.com/kubernetes/ingress-nginx
     tag_template: controller-v{version}
-    version: application

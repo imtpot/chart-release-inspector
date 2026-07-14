@@ -92,7 +92,7 @@ func TestHelmRepositorySourceRecognizesGitHubPages(t *testing.T) {
 
 func TestLoadReleaseNotesConfigValidatesAndMatchesChart(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "release-notes.yaml")
-	contents := "rules:\n  - chart: example\n    provider: github\n    repository: example/project\n    tag_template: release-{version}\n    version: application\n"
+	contents := "rules:\n  - chart: example\n    provider: github\n    repository: https://github.com/example/project\n    tag_template: release-{version}\n    version: application\n"
 	if err := os.WriteFile(filename, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -101,8 +101,19 @@ func TestLoadReleaseNotesConfigValidatesAndMatchesChart(t *testing.T) {
 		t.Fatal(err)
 	}
 	rule := config.RuleForChart("oci://registry.example/charts/example")
-	if rule.Repository != "example/project" || rule.TagTemplate != "release-{version}" {
+	if rule.Repository != "https://github.com/example/project" || rule.TagTemplate != "release-{version}" {
 		t.Fatalf("RuleForChart() = %#v", rule)
+	}
+}
+
+func TestLoadReleaseNotesConfigRejectsRepositoryShorthand(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "release-notes.yaml")
+	contents := "rules:\n  - chart: example\n    repository: example/project\n"
+	if err := os.WriteFile(filename, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadReleaseNotesConfig(filename); err == nil || !strings.Contains(err.Error(), "full GitHub URL") {
+		t.Fatalf("LoadReleaseNotesConfig() error = %v, want full GitHub URL error", err)
 	}
 }
 
@@ -165,7 +176,7 @@ func TestGitHubReleaseNotesTraversesMatchingIntermediateVersions(t *testing.T) {
 
 	notes, notesErr := githubReleaseNotes(
 		t.Context(),
-		ReleaseNoteRule{Provider: "github", Repository: "example/project", TagTemplate: "app-{version}"},
+		ReleaseNoteRule{Provider: "github", Repository: "https://github.com/example/project", TagTemplate: "app-{version}"},
 		"", "1.0.0", "1.3.0", 2,
 	)
 	if notesErr != "" {
@@ -197,7 +208,7 @@ func TestGitHubReleaseNotesFallsBackToPublicReleasePage(t *testing.T) {
 
 	notes, notesErr := githubReleaseNotes(
 		t.Context(),
-		ReleaseNoteRule{Provider: "github", Repository: "example/project", TagTemplate: "v{version}"},
+		ReleaseNoteRule{Provider: "github", Repository: "https://github.com/example/project", TagTemplate: "v{version}"},
 		"", "1.0.0", "1.1.0", 2000,
 	)
 	if len(notes) != 1 || len(notes[0].BodyPreview) != 1 || notes[0].BodyPreview[0] != "Release fallback notes" {
@@ -222,7 +233,7 @@ func TestGitHubReleaseNotesUsesEnvironmentToken(t *testing.T) {
 	githubAPIBase = server.URL
 
 	notes, notesErr := githubReleaseNotes(
-		t.Context(), ReleaseNoteRule{Provider: "github", Repository: "example/project"},
+		t.Context(), ReleaseNoteRule{Provider: "github", Repository: "https://github.com/example/project"},
 		"", "1.0.0", "1.1.0", 2000,
 	)
 	if notesErr != "" || len(notes) != 1 {
