@@ -17,9 +17,36 @@ type Options struct {
 }
 
 // Human prints a readable inspection report without changing the JSON contract.
-func Human(writer io.Writer, result inspector.Result, options Options) error {
-	renderSummary(writer, result, options)
+// It dynamically chooses detailed single-chart rendering or a summary table.
+func Human(writer io.Writer, result inspector.BatchResult, options Options) error {
+	if result.Error != "" {
+		fmt.Fprintf(writer, "Error: %s\n", result.Error)
+		return nil
+	}
+	if len(result.Results) == 1 {
+		return renderSingle(writer, result.Results[0], options)
+	}
+	return renderTable(writer, result, options)
+}
 
+// Warning writes a release-note diagnostic to the error stream.
+func Warning(writer io.Writer, message string, color bool) {
+	if message == "" {
+		return
+	}
+	text := "Release notes: " + message
+	if color {
+		text = pterm.FgYellow.Sprint(text)
+	}
+	fmt.Fprintln(writer, text)
+}
+
+func renderSingle(writer io.Writer, result inspector.Result, options Options) error {
+	if result.Error != "" {
+		fmt.Fprintf(writer, "Error: %s\n", result.Error)
+		return nil
+	}
+	renderSingleSummary(writer, result, options)
 	renderValuesDiff(writer, result, options)
 	if len(result.Releases) == 0 {
 		return nil
@@ -32,6 +59,51 @@ func Human(writer io.Writer, result inspector.Result, options Options) error {
 	for _, release := range result.Releases {
 		if err := renderRelease(writer, release, options); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func renderTable(writer io.Writer, result inspector.BatchResult, options Options) error {
+	tableData := pterm.TableData{
+		{"Chart", "Chart Version", "App Version", "Status"},
+	}
+	for _, res := range result.Results {
+		chart := res.ChartVersion
+		if res.TargetChartVersion != "" && res.TargetChartVersion != res.ChartVersion {
+			if options.Color {
+				chart = pterm.FgYellow.Sprint(res.ChartVersion) + " -> " + pterm.FgGreen.Sprint(res.TargetChartVersion)
+			} else {
+				chart = chart + " -> " + res.TargetChartVersion
+			}
+		}
+		app := res.AppVersion
+		if res.TargetAppVersion != "" && res.TargetAppVersion != res.AppVersion {
+			if options.Color {
+				app = pterm.FgYellow.Sprint(res.AppVersion) + " -> " + pterm.FgGreen.Sprint(res.TargetAppVersion)
+			} else {
+				app = app + " -> " + res.TargetAppVersion
+			}
+		}
+		status := res.Status
+		if options.Color {
+			switch status {
+			case inspector.StatusCurrent:
+				status = pterm.FgGray.Sprint(status)
+			case inspector.StatusUpdate:
+				status = pterm.FgGreen.Sprint(status)
+			case inspector.StatusError:
+				status = pterm.FgRed.Sprint(status)
+			}
+		}
+		tableData = append(tableData, []string{res.Chart, chart, app, status})
+	}
+
+	pterm.DefaultTable.WithHasHeader().WithData(tableData).WithWriter(writer).Render()
+
+	for _, res := range result.Results {
+		if res.Error != "" {
+			fmt.Fprintf(writer, "\nError in %s: %s\n", res.Chart, res.Error)
 		}
 	}
 	return nil
@@ -73,18 +145,6 @@ func renderValuesDiff(writer io.Writer, result inspector.Result, options Options
 	}
 }
 
-// Warning writes a release-note diagnostic to the error stream.
-func Warning(writer io.Writer, message string, color bool) {
-	if message == "" {
-		return
-	}
-	text := "Release notes: " + message
-	if color {
-		text = pterm.FgYellow.Sprint(text)
-	}
-	fprintln(writer, text)
-}
-
 func renderRelease(writer io.Writer, release inspector.ReleaseNote, options Options) error {
 	label := fmt.Sprintf("%s: %s", release.Version, release.URL)
 	if options.Color {
@@ -104,16 +164,16 @@ func renderRelease(writer io.Writer, release inspector.ReleaseNote, options Opti
 	return nil
 }
 
-func renderSummary(writer io.Writer, result inspector.Result, options Options) {
+func renderSingleSummary(writer io.Writer, result inspector.Result, options Options) {
 	source := sourceLabel(result.SourceType)
-	chart := result.CurrentChartVersion + " -> " + result.TargetChartVersion
-	application := result.CurrentAppVersion + " -> " + result.TargetAppVersion
+	chart := result.ChartVersion + " -> " + result.TargetChartVersion
+	application := result.AppVersion + " -> " + result.TargetAppVersion
 	if options.Color {
 		labelStyle := pterm.NewStyle(pterm.Bold, pterm.FgLightCyan)
 		currentStyle := pterm.NewStyle(pterm.Bold, pterm.FgYellow)
 		targetStyle := pterm.NewStyle(pterm.Bold, pterm.FgGreen)
-		chart = currentStyle.Sprint(result.CurrentChartVersion) + " -> " + targetStyle.Sprint(result.TargetChartVersion)
-		application = currentStyle.Sprint(result.CurrentAppVersion) + " -> " + targetStyle.Sprint(result.TargetAppVersion)
+		chart = currentStyle.Sprint(result.ChartVersion) + " -> " + targetStyle.Sprint(result.TargetChartVersion)
+		application = currentStyle.Sprint(result.AppVersion) + " -> " + targetStyle.Sprint(result.TargetAppVersion)
 		source = labelStyle.Sprint("Source:") + " " + source
 		chart = labelStyle.Sprint("Chart:") + " " + chart
 		application = labelStyle.Sprint("Application:") + " " + application
@@ -175,8 +235,4 @@ func renderMarkdown(markdown string, color bool) string {
 		rendered.WriteByte('\n')
 	}
 	return strings.TrimSpace(rendered.String())
-}
-
-func fprintln(writer io.Writer, text string) {
-	fmt.Fprintln(writer, text)
 }

@@ -41,89 +41,123 @@ func main() {
 	}
 }
 
+type Config struct {
+	Chart              string
+	Repository         string
+	Version            string
+	TargetVersion      string
+	ValuesDiff         bool
+	Filename           string
+	ReleaseNoteLimit   int
+	ReleaseNotesConfig string
+	SkipReleaseNotes   bool
+	Output             string
+	ColorMode          string
+	Color              bool
+	ReleaseNotes       inspector.ReleaseNotesConfig
+}
+
+func (c *Config) RegisterShared(flags *flag.FlagSet) {
+	flags.IntVar(&c.ReleaseNoteLimit, "release-note-limit", 2000, "maximum release-note characters; 0 keeps the complete body")
+	flags.StringVar(&c.ReleaseNotesConfig, "release-notes-config", "", "YAML file with chart-specific upstream release rules")
+	flags.BoolVar(&c.SkipReleaseNotes, "skip-release-notes", false, "skip fetching release notes")
+	flags.StringVar(&c.Output, "output", "terminal", "output format: terminal or json")
+	flags.StringVar(&c.ColorMode, "color", "auto", "color mode: auto, always, or never")
+}
+
+func (c *Config) ParseShared() error {
+	if !validOutput(c.Output) {
+		return fmt.Errorf("--output must be terminal or json")
+	}
+	color, err := useColor(c.ColorMode)
+	if err != nil {
+		return err
+	}
+	c.Color = color
+	if c.ReleaseNotesConfig != "" {
+		config, err := inspector.LoadReleaseNotesConfig(c.ReleaseNotesConfig)
+		if err != nil {
+			return err
+		}
+		c.ReleaseNotes = config
+	}
+	return nil
+}
+
 func inspect(args []string) {
+	c := &Config{}
 	flags := flag.NewFlagSet("inspect", flag.ExitOnError)
-	chart := flags.String("chart", "", "Helm chart name or oci:// reference")
-	repository := flags.String("repository", "", "Helm repository URL")
-	currentVersion := flags.String("current-version", "", "current chart version")
-	targetVersion := flags.String("target-version", "", "target chart version")
-	valuesDiff := flags.Bool("values-diff", false, "compare packaged values.yaml")
-	releaseNoteLimit := flags.Int("release-note-limit", 2000, "maximum release-note characters; 0 keeps the complete body")
-	releaseNotesConfig := flags.String("release-notes-config", "", "YAML file with chart-specific upstream release rules")
-	output := flags.String("output", "terminal", "output format: terminal or json")
-	colorMode := flags.String("color", "auto", "color mode: auto, always, or never")
+	flags.StringVar(&c.Chart, "chart", "", "Helm chart name or oci:// reference")
+	flags.StringVar(&c.Repository, "repository", "", "Helm repository URL")
+	flags.StringVar(&c.Version, "version", "", "chart version")
+	flags.StringVar(&c.TargetVersion, "target-version", "", "target chart version")
+	flags.BoolVar(&c.ValuesDiff, "values-diff", false, "compare packaged values.yaml")
+	c.RegisterShared(flags)
 	_ = flags.Parse(args)
 
-	input := inspector.Input{
-		Chart: *chart, Repository: *repository, CurrentVersion: *currentVersion,
-		TargetVersion: *targetVersion, IncludeDiff: *valuesDiff,
-		ReleaseNoteLimit: *releaseNoteLimit,
-	}
-	if *releaseNotesConfig != "" {
-		config, err := inspector.LoadReleaseNotesConfig(*releaseNotesConfig)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(exitError)
-		}
-		input.ReleaseNoteRule = config.RuleForChart(*chart)
-	}
-	if !validOutput(*output) {
-		fmt.Fprintln(os.Stderr, "--output must be terminal or json")
-		os.Exit(exitError)
-	}
-	color, err := useColor(*colorMode)
-	if err != nil {
+	if err := c.ParseShared(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(exitError)
 	}
-	result := inspector.Inspect(context.Background(), input)
-	if *output == "json" {
-		if err := writeJSON(result); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		os.Exit(exitCode(result))
-	}
-	if result.Error != "" {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", result.Error)
+
+	if c.Chart == "" || c.Version == "" {
+		fmt.Fprintln(os.Stderr, "--chart and --version are required")
 		os.Exit(exitError)
 	}
-	if err := render.Human(os.Stdout, result, render.Options{Color: color, Width: terminalWidth()}); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(exitError)
+
+	manifest := inspector.BatchManifest{
+		Charts: []inspector.BatchChart{
+			{
+				Chart:         c.Chart,
+				Repository:    c.Repository,
+				Version:       c.Version,
+				TargetVersion: c.TargetVersion,
+				ValuesDiff:    c.ValuesDiff,
+			},
+		},
 	}
-	render.Warning(os.Stderr, result.ReleaseNotesError, color)
-	os.Exit(exitCode(result))
+	runAndRender(manifest, c)
 }
 
 func batch(args []string) {
+	c := &Config{}
 	flags := flag.NewFlagSet("batch", flag.ExitOnError)
-	filename := flags.String("file", "", "YAML batch manifest")
-	releaseNoteLimit := flags.Int("release-note-limit", 2000, "maximum release-note characters; 0 keeps the complete body")
-	releaseNotesConfig := flags.String("release-notes-config", "", "YAML file with chart-specific upstream release rules")
+	flags.StringVar(&c.Filename, "file", "", "YAML batch manifest")
+	c.RegisterShared(flags)
 	_ = flags.Parse(args)
 
-	if *filename == "" {
+	if c.Filename == "" {
 		writeBatchError("--file is required")
 		return
 	}
-	manifest, err := inspector.LoadBatchManifest(*filename)
+	if err := c.ParseShared(); err != nil {
+		writeBatchError(err.Error())
+		return
+	}
+
+	manifest, err := inspector.LoadBatchManifest(c.Filename)
 	if err != nil {
 		writeBatchError(err.Error())
 		return
 	}
-	config := inspector.ReleaseNotesConfig{}
-	if *releaseNotesConfig != "" {
-		config, err = inspector.LoadReleaseNotesConfig(*releaseNotesConfig)
-		if err != nil {
-			writeBatchError(err.Error())
-			return
+	runAndRender(manifest, c)
+}
+
+func runAndRender(manifest inspector.BatchManifest, c *Config) {
+	result := inspector.InspectBatch(context.Background(), manifest, c.ReleaseNotes, c.ReleaseNoteLimit, c.SkipReleaseNotes)
+	if c.Output == "json" {
+		if err := writeJSON(result); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
+		os.Exit(exitCodeForStatus(result.Status))
 	}
-	result := inspector.InspectBatch(context.Background(), manifest, config, *releaseNoteLimit)
-	if err := writeJSON(result); err != nil {
+	if err := render.Human(os.Stdout, result, render.Options{Color: c.Color, Width: terminalWidth()}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(exitError)
+	}
+	if len(result.Results) == 1 {
+		render.Warning(os.Stderr, result.Results[0].ReleaseNotesError, c.Color)
 	}
 	os.Exit(exitCodeForStatus(result.Status))
 }

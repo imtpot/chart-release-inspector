@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 
 	"go.yaml.in/yaml/v3"
 )
 
-const BatchSchemaVersion = 1
+const BatchSchemaVersion = 2
 
 // BatchManifest declares chart inspections without coupling them to a deployment system.
 type BatchManifest struct {
@@ -17,11 +18,11 @@ type BatchManifest struct {
 
 // BatchChart describes one chart inspection in a batch manifest.
 type BatchChart struct {
-	Chart          string `yaml:"chart"`
-	Repository     string `yaml:"repository"`
-	CurrentVersion string `yaml:"current_version"`
-	TargetVersion  string `yaml:"target_version"`
-	ValuesDiff     bool   `yaml:"values_diff"`
+	Chart      string `yaml:"chart"`
+	Repository string `yaml:"repository"`
+	Version    string `yaml:"version"`
+	TargetVersion string `yaml:"target_version"`
+	ValuesDiff bool   `yaml:"values_diff"`
 }
 
 // BatchResult aggregates independent chart inspection results in manifest order.
@@ -52,29 +53,40 @@ func LoadBatchManifest(filename string) (BatchManifest, error) {
 	return manifest, nil
 }
 
-// InspectBatch runs each manifest entry independently and aggregates their statuses.
+// InspectBatch runs each manifest entry concurrently and aggregates their statuses.
 func InspectBatch(
 	ctx context.Context,
 	manifest BatchManifest,
 	releaseNotesConfig ReleaseNotesConfig,
 	releaseNoteLimit int,
+	skipReleaseNotes bool,
 ) BatchResult {
 	result := BatchResult{
 		SchemaVersion: BatchSchemaVersion,
 		Status:        StatusCurrent,
-		Results:       make([]Result, 0, len(manifest.Charts)),
+		Results:       make([]Result, len(manifest.Charts)),
 	}
-	for _, chart := range manifest.Charts {
-		chartResult := Inspect(ctx, Input{
-			Chart:            chart.Chart,
-			Repository:       chart.Repository,
-			CurrentVersion:   chart.CurrentVersion,
-			TargetVersion:    chart.TargetVersion,
-			IncludeDiff:      chart.ValuesDiff,
-			ReleaseNoteLimit: releaseNoteLimit,
-			ReleaseNoteRule:  releaseNotesConfig.RuleForChart(chart.Chart),
-		})
-		result.Results = append(result.Results, chartResult)
+
+	var wg sync.WaitGroup
+	for i, chart := range manifest.Charts {
+		wg.Add(1)
+		go func(index int, c BatchChart) {
+			defer wg.Done()
+			result.Results[index] = Inspect(ctx, Input{
+				Chart:            c.Chart,
+				Repository:       c.Repository,
+				Version:          c.Version,
+				TargetVersion:    c.TargetVersion,
+				IncludeDiff:      c.ValuesDiff,
+				ReleaseNoteLimit: releaseNoteLimit,
+				ReleaseNoteRule:  releaseNotesConfig.RuleForChart(c.Chart),
+				SkipReleaseNotes: skipReleaseNotes,
+			})
+		}(i, chart)
+	}
+	wg.Wait()
+
+	for _, chartResult := range result.Results {
 		switch chartResult.Status {
 		case StatusError:
 			result.Status = StatusError
@@ -84,5 +96,6 @@ func InspectBatch(
 			}
 		}
 	}
+
 	return result
 }

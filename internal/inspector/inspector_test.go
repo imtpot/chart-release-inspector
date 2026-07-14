@@ -33,13 +33,13 @@ func TestLatestStableTagIgnoresPrereleases(t *testing.T) {
 
 func TestInspectRequiresChartAndVersion(t *testing.T) {
 	result := Inspect(t.Context(), Input{})
-	if result.SchemaVersion != SchemaVersion || result.Status != StatusError {
-		t.Fatalf("Inspect() contract = schema %d, status %q", result.SchemaVersion, result.Status)
+	if result.Status != StatusError {
+		t.Fatalf("Inspect() status = %q", result.Status)
 	}
-	if result.CurrentChartVersion != "" {
-		t.Fatalf("Inspect().CurrentChartVersion = %q, want empty", result.CurrentChartVersion)
+	if result.ChartVersion != "" {
+		t.Fatalf("Inspect().ChartVersion = %q, want empty", result.ChartVersion)
 	}
-	if result.Error != "--chart and --current-version are required" {
+	if result.Error != "--chart and --version are required" {
 		t.Fatalf("Inspect().Error = %q", result.Error)
 	}
 }
@@ -60,7 +60,6 @@ func TestPreviewLinesNormalizesLineEndingsAndPreservesIndentation(t *testing.T) 
 
 func TestResultJSONEmitsValuesDiffLines(t *testing.T) {
 	encoded, err := json.Marshal(Result{
-		SchemaVersion: SchemaVersion,
 		ValuesDiff:    []string{"--- values.yaml (1.0.0)", "+replicas: 2"},
 		Releases: []ReleaseNote{{
 			BodyPreview: []string{"# Notes", "", "  code"},
@@ -70,7 +69,6 @@ func TestResultJSONEmitsValuesDiffLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	var decoded struct {
-		SchemaVersion int      `json:"schema_version"`
 		ValuesDiff    []string `json:"values_diff"`
 		Releases      []struct {
 			BodyPreview []string `json:"body_preview"`
@@ -79,7 +77,7 @@ func TestResultJSONEmitsValuesDiffLines(t *testing.T) {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != SchemaVersion || len(decoded.ValuesDiff) != 2 || decoded.ValuesDiff[1] != "+replicas: 2" || len(decoded.Releases) != 1 || decoded.Releases[0].BodyPreview[2] != "  code" {
+	if len(decoded.ValuesDiff) != 2 || decoded.ValuesDiff[1] != "+replicas: 2" || len(decoded.Releases) != 1 || decoded.Releases[0].BodyPreview[2] != "  code" {
 		t.Fatalf("JSON contract = %#v", decoded)
 	}
 }
@@ -148,9 +146,9 @@ func TestInspectBatchAggregatesResultsInManifestOrder(t *testing.T) {
 	defer server.Close()
 
 	result := InspectBatch(t.Context(), BatchManifest{Charts: []BatchChart{
-		{Chart: "example", Repository: server.URL, CurrentVersion: "1.0.0"},
-		{Chart: "", CurrentVersion: "1.0.0"},
-	}}, ReleaseNotesConfig{}, 2000)
+		{Chart: "example", Repository: server.URL, Version: "1.0.0"},
+		{Chart: "", Version: "1.0.0"},
+	}}, ReleaseNotesConfig{}, 2000, false)
 
 	if result.SchemaVersion != BatchSchemaVersion || result.Status != StatusError {
 		t.Fatalf("InspectBatch() contract = %#v", result)
@@ -177,7 +175,7 @@ func TestGitHubReleaseNotesTraversesMatchingIntermediateVersions(t *testing.T) {
 	notes, notesErr := githubReleaseNotes(
 		t.Context(),
 		ReleaseNoteRule{Provider: "github", Repository: "https://github.com/example/project", TagTemplate: "app-{version}"},
-		"", "1.0.0", "1.3.0", 2,
+		"", "1.0.0", "1.3.0", 2, false,
 	)
 	if notesErr != "" {
 		t.Fatalf("githubReleaseNotes() error = %q", notesErr)
@@ -209,7 +207,7 @@ func TestGitHubReleaseNotesFallsBackToPublicReleasePage(t *testing.T) {
 	notes, notesErr := githubReleaseNotes(
 		t.Context(),
 		ReleaseNoteRule{Provider: "github", Repository: "https://github.com/example/project", TagTemplate: "v{version}"},
-		"", "1.0.0", "1.1.0", 2000,
+		"", "1.0.0", "1.1.0", 2000, false,
 	)
 	if len(notes) != 1 || len(notes[0].BodyPreview) != 1 || notes[0].BodyPreview[0] != "Release fallback notes" {
 		t.Fatalf("fallback notes = %#v", notes)
@@ -234,10 +232,24 @@ func TestGitHubReleaseNotesUsesEnvironmentToken(t *testing.T) {
 
 	notes, notesErr := githubReleaseNotes(
 		t.Context(), ReleaseNoteRule{Provider: "github", Repository: "https://github.com/example/project"},
-		"", "1.0.0", "1.1.0", 2000,
+		"", "1.0.0", "1.1.0", 2000, false,
 	)
 	if notesErr != "" || len(notes) != 1 {
 		t.Fatalf("githubReleaseNotes() = %#v, %q", notes, notesErr)
+	}
+}
+
+func TestGitHubReleaseNotesSkipsWhenRequested(t *testing.T) {
+	notes, notesErr := githubReleaseNotes(
+		t.Context(),
+		ReleaseNoteRule{Provider: "github", Repository: "https://github.com/example/project", TagTemplate: "v{version}"},
+		"", "1.0.0", "1.1.0", 2000, true,
+	)
+	if notesErr != "" {
+		t.Fatalf("githubReleaseNotes() error = %q", notesErr)
+	}
+	if len(notes) != 0 {
+		t.Fatalf("expected 0 notes, got %#v", notes)
 	}
 }
 
@@ -261,14 +273,14 @@ func TestInspectRepositoryUsesHelmIndexAndChartFixtures(t *testing.T) {
 	defer server.Close()
 
 	result := Inspect(t.Context(), Input{
-		Chart: "example", Repository: server.URL, CurrentVersion: "1.0.0", IncludeDiff: true,
+		Chart: "example", Repository: server.URL, Version: "1.0.0", IncludeDiff: true,
 	})
 
 	if result.Status != StatusUpdate || result.TargetChartVersion != "1.1.0" {
 		t.Fatalf("Inspect() status/version = %q/%q", result.Status, result.TargetChartVersion)
 	}
-	if result.CurrentAppVersion != "v1.0.0" || result.TargetAppVersion != "v1.1.0" {
-		t.Fatalf("Inspect() application transition = %q -> %q", result.CurrentAppVersion, result.TargetAppVersion)
+	if result.AppVersion != "v1.0.0" || result.TargetAppVersion != "v1.1.0" {
+		t.Fatalf("Inspect() application transition = %q -> %q", result.AppVersion, result.TargetAppVersion)
 	}
 	if result.ValuesDiffChanged == nil || !*result.ValuesDiffChanged || len(result.ValuesDiff) == 0 {
 		t.Fatalf("Inspect() did not produce a values diff: %#v", result)
@@ -290,7 +302,7 @@ func TestInspectOCIFixtureUsesHelmRegistryContract(t *testing.T) {
 	}
 
 	result := Inspect(t.Context(), Input{
-		Chart: "oci://registry.example/charts/example", CurrentVersion: "1.0.0", IncludeDiff: true,
+		Chart: "oci://registry.example/charts/example", Version: "1.0.0", IncludeDiff: true,
 	})
 
 	if result.SourceType != "oci_registry" || result.Status != StatusUpdate {

@@ -27,14 +27,13 @@ import (
 type Input struct {
 	Chart            string
 	Repository       string
-	CurrentVersion   string
+	Version          string
 	TargetVersion    string
 	IncludeDiff      bool
 	ReleaseNoteLimit int
 	ReleaseNoteRule  ReleaseNoteRule
+	SkipReleaseNotes bool
 }
-
-const SchemaVersion = 4
 
 const (
 	StatusCurrent = "current"
@@ -53,19 +52,19 @@ type ReleaseNote struct {
 
 // Result is the machine-readable contract emitted by the standalone CLI.
 type Result struct {
-	SchemaVersion       int           `json:"schema_version"`
-	Status              string        `json:"status"`
-	SourceType          string        `json:"source_type"`
-	CurrentChartVersion string        `json:"current_chart_version"`
-	TargetChartVersion  string        `json:"target_chart_version,omitempty"`
-	CurrentAppVersion   string        `json:"current_app_version,omitempty"`
-	TargetAppVersion    string        `json:"target_app_version,omitempty"`
-	Error               string        `json:"error,omitempty"`
-	ValuesDiff          []string      `json:"values_diff,omitempty"`
-	ValuesDiffChanged   *bool         `json:"values_diff_changed,omitempty"`
-	ValuesDiffError     string        `json:"values_diff_error,omitempty"`
-	ReleaseNotesError   string        `json:"release_notes_error,omitempty"`
-	Releases            []ReleaseNote `json:"releases"`
+	Chart             string        `json:"chart,omitempty"`
+	Status            string        `json:"status"`
+	SourceType        string        `json:"source_type"`
+	ChartVersion      string        `json:"chart_version"`
+	TargetChartVersion string        `json:"target_chart_version,omitempty"`
+	AppVersion        string        `json:"app_version,omitempty"`
+	TargetAppVersion  string        `json:"target_app_version,omitempty"`
+	Error             string        `json:"error,omitempty"`
+	ValuesDiff        []string      `json:"values_diff,omitempty"`
+	ValuesDiffChanged *bool         `json:"values_diff_changed,omitempty"`
+	ValuesDiffError   string        `json:"values_diff_error,omitempty"`
+	ReleaseNotesError string        `json:"release_notes_error,omitempty"`
+	Releases          []ReleaseNote `json:"releases"`
 }
 
 type chartVersion struct {
@@ -88,13 +87,13 @@ var newOCIRegistryClient = func() (ociRegistryClient, error) {
 // Inspect resolves a standard Helm repository or OCI chart using the Helm SDK.
 func Inspect(ctx context.Context, input Input) Result {
 	result := Result{
-		SchemaVersion:       SchemaVersion,
-		Status:              StatusError,
-		CurrentChartVersion: input.CurrentVersion,
-		Releases:            []ReleaseNote{},
+		Chart:         input.Chart,
+		Status:        StatusError,
+		ChartVersion:  input.Version,
+		Releases:      []ReleaseNote{},
 	}
-	if input.Chart == "" || input.CurrentVersion == "" {
-		result.Error = "--chart and --current-version are required"
+	if input.Chart == "" || input.Version == "" {
+		result.Error = "--chart and --version are required"
 		return result
 	}
 
@@ -117,12 +116,12 @@ func Inspect(ctx context.Context, input Input) Result {
 	}
 
 	result.TargetChartVersion = target.Version
-	result.CurrentAppVersion = applicationVersion(current)
+	result.AppVersion = applicationVersion(current)
 	result.TargetAppVersion = applicationVersion(target)
-	currentReleaseVersion := result.CurrentAppVersion
+	currentReleaseVersion := result.AppVersion
 	targetReleaseVersion := result.TargetAppVersion
 	if input.ReleaseNoteRule.Version == "chart" {
-		currentReleaseVersion = result.CurrentChartVersion
+		currentReleaseVersion = result.ChartVersion
 		targetReleaseVersion = result.TargetChartVersion
 	}
 	result.Releases, result.ReleaseNotesError = githubReleaseNotes(
@@ -132,11 +131,12 @@ func Inspect(ctx context.Context, input Input) Result {
 		currentReleaseVersion,
 		targetReleaseVersion,
 		input.ReleaseNoteLimit,
+		input.SkipReleaseNotes,
 	)
 	if input.IncludeDiff {
 		changed := false
 		result.ValuesDiffChanged = &changed
-		if sameVersion(input.CurrentVersion, target.Version) {
+		if sameVersion(input.Version, target.Version) {
 			result.Status = StatusCurrent
 			return result
 		}
@@ -144,11 +144,11 @@ func Inspect(ctx context.Context, input Input) Result {
 			result.ValuesDiffError = "could not download chart values"
 			return result
 		}
-		result.ValuesDiff = diffLines(unifiedDiff(current.Values, target.Values, input.CurrentVersion, target.Version))
+		result.ValuesDiff = diffLines(unifiedDiff(current.Values, target.Values, input.Version, target.Version))
 		changed = len(result.ValuesDiff) > 0
 		result.ValuesDiffChanged = &changed
 	}
-	if sameVersion(input.CurrentVersion, target.Version) {
+	if sameVersion(input.Version, target.Version) {
 		result.Status = StatusCurrent
 	} else {
 		result.Status = StatusUpdate
@@ -186,19 +186,19 @@ func inspectRepository(input Input) (chartVersion, chartVersion, error) {
 	if len(entries) == 0 {
 		return chartVersion{}, chartVersion{}, fmt.Errorf("chart %q not found in repository", input.Chart)
 	}
-	currentEntry := findEntry(entries, input.CurrentVersion)
+	currentEntry := findEntry(entries, input.Version)
 	if currentEntry == nil {
-		return chartVersion{}, chartVersion{}, fmt.Errorf("configured chart version %s not found", input.CurrentVersion)
+		return chartVersion{}, chartVersion{}, fmt.Errorf("configured chart version %s not found", input.Version)
 	}
 	targetEntry := findEntry(entries, input.TargetVersion)
 	if input.TargetVersion == "" {
-		targetEntry = latestStable(entries, input.CurrentVersion)
+		targetEntry = latestStable(entries, input.Version)
 	}
 	if targetEntry == nil {
 		return chartVersion{}, chartVersion{}, fmt.Errorf("target chart version %s not found", input.TargetVersion)
 	}
-	if olderThan(targetEntry.Version, input.CurrentVersion) {
-		return chartVersion{}, chartVersion{}, fmt.Errorf("target chart version %s is older than configured version %s", targetEntry.Version, input.CurrentVersion)
+	if olderThan(targetEntry.Version, input.Version) {
+		return chartVersion{}, chartVersion{}, fmt.Errorf("target chart version %s is older than configured version %s", targetEntry.Version, input.Version)
 	}
 	current := fromRepositoryEntry(currentEntry)
 	target := fromRepositoryEntry(targetEntry)
@@ -221,15 +221,15 @@ func inspectOCI(input Input) (chartVersion, chartVersion, error) {
 	}
 	targetVersion := input.TargetVersion
 	if targetVersion == "" {
-		targetVersion = latestStableTag(tags, input.CurrentVersion)
+		targetVersion = latestStableTag(tags, input.Version)
 	}
 	if targetVersion == "" {
 		return chartVersion{}, chartVersion{}, errors.New("no compatible OCI tags found")
 	}
-	if olderThan(targetVersion, input.CurrentVersion) {
-		return chartVersion{}, chartVersion{}, fmt.Errorf("target chart version %s is older than configured version %s", targetVersion, input.CurrentVersion)
+	if olderThan(targetVersion, input.Version) {
+		return chartVersion{}, chartVersion{}, fmt.Errorf("target chart version %s is older than configured version %s", targetVersion, input.Version)
 	}
-	current, err := pullOCI(client, input.Chart, input.CurrentVersion)
+	current, err := pullOCI(client, input.Chart, input.Version)
 	if err != nil {
 		return chartVersion{}, chartVersion{}, err
 	}

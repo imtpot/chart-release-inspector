@@ -10,15 +10,17 @@ import (
 
 func TestHumanPlainOutputIncludesReleaseNotes(t *testing.T) {
 	var output bytes.Buffer
-	err := Human(&output, inspector.Result{
-		SourceType:          "helm_repository",
-		CurrentChartVersion: "1.0.0",
-		TargetChartVersion:  "1.1.0",
-		CurrentAppVersion:   "v1.0.0",
-		TargetAppVersion:    "v1.1.0",
-		Releases: []inspector.ReleaseNote{{
-			Version: "1.1.0", URL: "https://example.test/releases/1.1.0",
-			BodyPreview: []string{"# Breaking change"}, BodyCharacters: 42, Truncated: true,
+	err := Human(&output, inspector.BatchResult{
+		Results: []inspector.Result{{
+			SourceType:          "helm_repository",
+			ChartVersion:       "1.0.0",
+			TargetChartVersion:  "1.1.0",
+			AppVersion:         "v1.0.0",
+			TargetAppVersion:    "v1.1.0",
+			Releases: []inspector.ReleaseNote{{
+				Version: "1.1.0", URL: "https://example.test/releases/1.1.0",
+				BodyPreview: []string{"# Breaking change"}, BodyCharacters: 42, Truncated: true,
+			}},
 		}},
 	}, Options{Width: 80})
 	if err != nil {
@@ -42,14 +44,16 @@ func TestHumanPlainOutputIncludesReleaseNotes(t *testing.T) {
 func TestHumanOutputIncludesValuesDiffWithoutReleaseNotes(t *testing.T) {
 	changed := true
 	var output bytes.Buffer
-	err := Human(&output, inspector.Result{
-		SourceType:          "helm_repository",
-		CurrentChartVersion: "1.0.0",
-		TargetChartVersion:  "1.1.0",
-		CurrentAppVersion:   "v1.0.0",
-		TargetAppVersion:    "v1.1.0",
-		ValuesDiffChanged:   &changed,
-		ValuesDiff:          []string{"--- values.yaml (1.0.0)", "+++ values.yaml (1.1.0)", "@@ -1 +1 @@", "-replicas: 1", "+replicas: 2"},
+	err := Human(&output, inspector.BatchResult{
+		Results: []inspector.Result{{
+			SourceType:          "helm_repository",
+			ChartVersion:       "1.0.0",
+			TargetChartVersion:  "1.1.0",
+			AppVersion:         "v1.0.0",
+			TargetAppVersion:    "v1.1.0",
+			ValuesDiffChanged:   &changed,
+			ValuesDiff:          []string{"--- values.yaml (1.0.0)", "+++ values.yaml (1.1.0)", "@@ -1 +1 @@", "-replicas: 1", "+replicas: 2"},
+		}},
 	}, Options{Width: 80})
 	if err != nil {
 		t.Fatal(err)
@@ -85,15 +89,17 @@ func TestRenderMarkdownPreservesFencedCodeWithoutPadding(t *testing.T) {
 
 func TestHumanColorOutputRendersMarkdown(t *testing.T) {
 	var output bytes.Buffer
-	err := Human(&output, inspector.Result{
-		SourceType:          "helm_repository",
-		CurrentChartVersion: "1.0.0",
-		TargetChartVersion:  "1.1.0",
-		CurrentAppVersion:   "v1.0.0",
-		TargetAppVersion:    "v1.1.0",
-		Releases: []inspector.ReleaseNote{{
-			Version: "1.1.0", URL: "https://example.test/releases/1.1.0",
-			BodyPreview: []string{"# Breaking change", "", "Use `layerSelector`."},
+	err := Human(&output, inspector.BatchResult{
+		Results: []inspector.Result{{
+			SourceType:          "helm_repository",
+			ChartVersion:       "1.0.0",
+			TargetChartVersion:  "1.1.0",
+			AppVersion:         "v1.0.0",
+			TargetAppVersion:    "v1.1.0",
+			Releases: []inspector.ReleaseNote{{
+				Version: "1.1.0", URL: "https://example.test/releases/1.1.0",
+				BodyPreview: []string{"# Breaking change", "", "Use `layerSelector`."},
+			}},
 		}},
 	}, Options{Color: true, Width: 80})
 	if err != nil {

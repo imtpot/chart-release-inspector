@@ -93,8 +93,9 @@ func githubReleaseNotes(
 	rule ReleaseNoteRule,
 	source, currentVersion, targetVersion string,
 	excerptLimit int,
+	skip bool,
 ) ([]ReleaseNote, string) {
-	if rule.Provider == "none" || targetVersion == "" {
+	if skip || rule.Provider == "none" || targetVersion == "" {
 		return []ReleaseNote{}, ""
 	}
 	if rule.Repository != "" {
