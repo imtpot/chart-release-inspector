@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	exitCurrent         = iota
+	exitCurrent         = 0
 	exitUpdateAvailable = 10
 	exitError           = 20
 )
@@ -51,6 +51,7 @@ type Config struct {
 	ReleaseNoteLimit   int
 	ReleaseNotesConfig string
 	SkipReleaseNotes   bool
+	FailOnUpdate       bool
 	Output             string
 	ColorMode          string
 	Color              bool
@@ -61,6 +62,7 @@ func (c *Config) RegisterShared(flags *flag.FlagSet) {
 	flags.IntVar(&c.ReleaseNoteLimit, "release-note-limit", 2000, "maximum release-note characters; 0 keeps the complete body")
 	flags.StringVar(&c.ReleaseNotesConfig, "release-notes-config", "", "YAML file with chart-specific upstream release rules")
 	flags.BoolVar(&c.SkipReleaseNotes, "skip-release-notes", false, "skip fetching release notes")
+	flags.BoolVar(&c.FailOnUpdate, "fail-on-update", false, "exit with code 10 when updates are available")
 	flags.StringVar(&c.Output, "output", "terminal", "output format: terminal or json")
 	flags.StringVar(&c.ColorMode, "color", "auto", "color mode: auto, always, or never")
 }
@@ -150,7 +152,7 @@ func runAndRender(manifest inspector.BatchManifest, c *Config) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		os.Exit(exitCodeForStatus(result.Status))
+		os.Exit(exitCodeForStatus(result.Status, c.FailOnUpdate))
 	}
 	if err := render.Human(os.Stdout, result, render.Options{Color: c.Color, Width: terminalWidth()}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -159,7 +161,7 @@ func runAndRender(manifest inspector.BatchManifest, c *Config) {
 	if len(result.Results) == 1 {
 		render.Warning(os.Stderr, result.Results[0].ReleaseNotesError, c.Color)
 	}
-	os.Exit(exitCodeForStatus(result.Status))
+	os.Exit(exitCodeForStatus(result.Status, c.FailOnUpdate))
 }
 
 func writeBatchError(message string) {
@@ -239,16 +241,15 @@ func terminalWidth() int {
 	return width
 }
 
-func exitCode(result inspector.Result) int {
-	return exitCodeForStatus(result.Status)
-}
-
-func exitCodeForStatus(status string) int {
+func exitCodeForStatus(status string, failOnUpdate bool) int {
 	switch status {
 	case inspector.StatusCurrent:
 		return exitCurrent
 	case inspector.StatusUpdate:
-		return exitUpdateAvailable
+		if failOnUpdate {
+			return exitUpdateAvailable
+		}
+		return exitCurrent
 	default:
 		return exitError
 	}

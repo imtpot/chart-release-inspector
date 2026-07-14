@@ -21,9 +21,9 @@ project-specific configuration formats.
   version only for a deliberate incompatible contract change.
 - `inspect --output json` and `batch` write JSON to stdout; diagnostics go to
   stderr.
-- Preserve semantic exit codes: `0` for current, `10` for an available update,
-  and `20` for errors. Batch must continue inspecting remaining entries after
-  an individual chart error.
+- Preserve semantic exit codes: `0` for success, `10` for updates available
+  (only when `--fail-on-update` is set), and `20` for errors. Batch must
+  continue inspecting remaining entries after an individual chart error.
 - Do not print credentials, tokens, or complete release-note bodies beyond the
   configured limit.
 

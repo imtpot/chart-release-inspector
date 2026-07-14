@@ -130,13 +130,19 @@ chart-release-inspector config validate release-notes.yaml
 
 ## Automation Contract
 
-Integrate it cleanly into your CI/CD pipelines using semantic exit codes and deterministic JSON:
+Integrate it cleanly into your CI/CD pipelines using deterministic JSON and exit codes:
 
-| Exit Code | Status | Meaning |
-| :---: | :--- | :--- |
-| **`0`** | `current` | Target chart is already up to date. |
-| **`10`** | `update_available` | A newer chart version is available. |
-| **`20`** | `error` | Upstream lookup or validation failed. |
+| Exit Code | Meaning |
+| :---: | :--- |
+| **`0`** | Lookup completed successfully (current or update available). |
+| **`10`** | Updates available (only with `--fail-on-update`). |
+| **`20`** | Upstream lookup or validation failed. |
+
+By default, both `current` and `update_available` exit with `0`. Pass `--fail-on-update` to exit with `10` when updates are available — useful for CI/CD gates:
+
+```sh
+chart-release-inspector batch --file charts.yaml --fail-on-update
+```
 
 Get JSON output using `--output json`:
 ```sh
