@@ -10,10 +10,10 @@ Know what changes before your Helm chart does.
 OCI chart upgrades. It finds the selected chart version, resolves the matching
 application version, compares packaged `values.yaml`, and collects relevant
 GitHub release notes. It never applies an upgrade or contacts your Kubernetes
-cluster.
+cluster, making it a safe review primitive for people, CI, and AI coding agents.
 
-Built for humans making an upgrade decision and for automation that needs a
-small, stable JSON contract.
+Built for human upgrade decisions and automation that needs a small, stable JSON
+contract.
 
 ## Why Use It
 
@@ -21,7 +21,8 @@ small, stable JSON contract.
 - See default `values.yaml` changes before updating your own values.
 - Read upstream release notes using each project's tag conventions.
 - Check many independent charts from one source-neutral YAML manifest.
-- Use semantic exit codes and deterministic JSON in CI, bots, and IaC adapters.
+- Use semantic exit codes and deterministic JSON in CI, bots, IaC adapters, and
+  AI coding-agent workflows.
 - Support both classic Helm repositories and `oci://` charts with one command.
 
 ## Quick Start
@@ -128,6 +129,25 @@ Every manifest entry is inspected in order. A failing chart does not prevent
 the other checks from completing. Batch always writes JSON to stdout, making it
 easy to redirect, archive, or pass to another command. Start with the
 ready-to-run [`charts.example.yaml`](charts.example.yaml).
+
+## For AI Agents
+
+`chart-release-inspector` works well as a read-only upgrade-review step for
+coding agents. An agent can translate a repository's component configuration
+into a neutral batch manifest, run the CLI, and use the JSON report to explain
+the upgrade impact without needing cluster credentials or making any changes.
+
+```sh
+chart-release-inspector batch \
+  --file charts.yaml \
+  --release-notes-config release-notes.yaml > report.json
+```
+
+Agents should parse the JSON written to stdout even when the process exits with
+`10` or `20`: those exit codes convey update availability or an inspection
+error, while the report retains results for every chart. Keep the generated
+manifest and report as review artifacts, and leave deployment decisions to the
+repository's existing workflow.
 
 ## Release Notes
 
