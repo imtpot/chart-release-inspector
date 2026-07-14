@@ -65,7 +65,7 @@ See version transitions and default value changes:
 chart-release-inspector inspect \
   --chart external-secrets \
   --repository https://charts.external-secrets.io \
-  --current-version 2.1.0 \
+  --version 2.1.0 \
   --values-diff
 ```
 
@@ -74,7 +74,7 @@ For **OCI charts**, pass the registry reference directly:
 ```sh
 chart-release-inspector inspect \
   --chart oci://ghcr.io/grafana/helm-charts/grafana \
-  --current-version 10.5.14
+  --version 10.5.14
 ```
 
 ---
@@ -88,10 +88,10 @@ Audit multiple charts at once using a declarative YAML file:
 charts:
   - chart: external-secrets
     repository: https://charts.external-secrets.io
-    current_version: 2.7.0
+    version: 2.7.0
     values_diff: true
   - chart: oci://ghcr.io/grafana/helm-charts/grafana
-    current_version: 10.5.14
+    version: 10.5.14
 ```
 
 Run the batch check (individual failures won't block the remaining checks):
