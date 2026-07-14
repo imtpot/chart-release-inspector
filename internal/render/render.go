@@ -18,13 +18,7 @@ type Options struct {
 
 // Human prints a readable inspection report without changing the JSON contract.
 func Human(writer io.Writer, result inspector.Result, options Options) error {
-	if options.Color {
-		fmt.Fprintln(writer, summaryPanel(result))
-	} else {
-		fmt.Fprintf(writer, "Source: %s\n", sourceLabel(result.SourceType))
-		fmt.Fprintf(writer, "Chart: %s -> %s\n", result.CurrentChartVersion, result.TargetChartVersion)
-		fmt.Fprintf(writer, "Application: %s -> %s\n", result.CurrentAppVersion, result.TargetAppVersion)
-	}
+	renderSummary(writer, result, options)
 
 	renderValuesDiff(writer, result, options)
 	if len(result.Releases) == 0 {
@@ -110,19 +104,27 @@ func renderRelease(writer io.Writer, release inspector.ReleaseNote, options Opti
 	return nil
 }
 
-func summaryPanel(result inspector.Result) string {
-	labelStyle := pterm.NewStyle(pterm.Bold, pterm.FgLightCyan)
-	currentStyle := pterm.NewStyle(pterm.Bold, pterm.FgYellow)
-	targetStyle := pterm.NewStyle(pterm.Bold, pterm.FgGreen)
-	content := strings.Join([]string{
-		labelStyle.Sprint("Source:") + " " + sourceLabel(result.SourceType),
-		labelStyle.Sprint("Chart:") + " " + currentStyle.Sprint(result.CurrentChartVersion) + " -> " + targetStyle.Sprint(result.TargetChartVersion),
-		labelStyle.Sprint("Application:") + " " + currentStyle.Sprint(result.CurrentAppVersion) + " -> " + targetStyle.Sprint(result.TargetAppVersion),
-	}, "\n")
-	return pterm.DefaultBox.
-		WithTitle(pterm.NewStyle(pterm.Bold, pterm.FgLightCyan).Sprint("Chart update")).
-		WithBoxStyle(pterm.FgLightCyan.ToStyle()).
-		Sprint(content)
+func renderSummary(writer io.Writer, result inspector.Result, options Options) {
+	source := sourceLabel(result.SourceType)
+	chart := result.CurrentChartVersion + " -> " + result.TargetChartVersion
+	application := result.CurrentAppVersion + " -> " + result.TargetAppVersion
+	if options.Color {
+		labelStyle := pterm.NewStyle(pterm.Bold, pterm.FgLightCyan)
+		currentStyle := pterm.NewStyle(pterm.Bold, pterm.FgYellow)
+		targetStyle := pterm.NewStyle(pterm.Bold, pterm.FgGreen)
+		chart = currentStyle.Sprint(result.CurrentChartVersion) + " -> " + targetStyle.Sprint(result.TargetChartVersion)
+		application = currentStyle.Sprint(result.CurrentAppVersion) + " -> " + targetStyle.Sprint(result.TargetAppVersion)
+		source = labelStyle.Sprint("Source:") + " " + source
+		chart = labelStyle.Sprint("Chart:") + " " + chart
+		application = labelStyle.Sprint("Application:") + " " + application
+	} else {
+		source = "Source: " + source
+		chart = "Chart: " + chart
+		application = "Application: " + application
+	}
+	fmt.Fprintln(writer, source)
+	fmt.Fprintln(writer, chart)
+	fmt.Fprintln(writer, application)
 }
 
 func sourceLabel(sourceType string) string {

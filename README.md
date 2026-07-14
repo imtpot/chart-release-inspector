@@ -1,54 +1,38 @@
 # Chart Release Inspector
 
 [![CI](https://github.com/imtpot/chart-release-inspector/actions/workflows/ci.yml/badge.svg)](https://github.com/imtpot/chart-release-inspector/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/imtpot/chart-release-inspector?display_name=tag&sort=semver)](https://github.com/imtpot/chart-release-inspector/releases)
+[![License](https://img.shields.io/github/license/imtpot/chart-release-inspector)](LICENSE)
 
-`chart-release-inspector` checks whether a Helm chart has an available update.
-It works with Helm repositories and OCI registries, resolves the chart's
-application version, optionally compares packaged `values.yaml`, and can collect
-matching GitHub release notes.
+Know what changes before your Helm chart does.
 
-## Install
+`chart-release-inspector` is a standalone CLI for reviewing Helm repository and
+OCI chart upgrades. It finds the selected chart version, resolves the matching
+application version, compares packaged `values.yaml`, and collects relevant
+GitHub release notes. It never applies an upgrade or contacts your Kubernetes
+cluster.
 
-Use a published binary from GitHub Releases, or install the command with Go 1.26
-or newer:
+Built for humans making an upgrade decision and for automation that needs a
+small, stable JSON contract.
+
+## Why Use It
+
+- Review chart and application version changes together.
+- See default `values.yaml` changes before updating your own values.
+- Read upstream release notes using each project's tag conventions.
+- Check many independent charts from one source-neutral YAML manifest.
+- Use semantic exit codes and deterministic JSON in CI, bots, and IaC adapters.
+- Support both classic Helm repositories and `oci://` charts with one command.
+
+## Quick Start
+
+Install with Go 1.26 or newer:
 
 ```sh
 go install github.com/imtpot/chart-release-inspector/cmd/chart-release-inspector@latest
 ```
 
-### mise
-
-Add the pinned GitHub release to a project `mise.toml`:
-
-```toml
-[tools]
-"github:imtpot/chart-release-inspector" = "0.1.0"
-```
-
-Install and use it:
-
-```sh
-mise install
-mise exec -- chart-release-inspector version
-```
-
-mise may hide a newly published release until it reaches its configured minimum
-release age. To install a specific new version intentionally, use a one-time
-override:
-
-```sh
-mise install --minimum-release-age 0d github:imtpot/chart-release-inspector@0.1.0
-```
-
-To build from a checkout:
-
-```sh
-go build -o bin/chart-release-inspector ./cmd/chart-release-inspector
-```
-
-## Quick Start
-
-Inspect a chart from a Helm repository:
+Inspect a specific upgrade, including the default values change:
 
 ```sh
 chart-release-inspector inspect \
@@ -59,8 +43,8 @@ chart-release-inspector inspect \
   --values-diff
 ```
 
-Inspect an OCI chart. OCI references include their registry, so
-`--repository` is not needed:
+Omit `--target-version` to inspect the newest stable chart version. For OCI
+charts, use the full reference; no separate repository is needed:
 
 ```sh
 chart-release-inspector inspect \
@@ -69,12 +53,62 @@ chart-release-inspector inspect \
   --output json
 ```
 
-When `--target-version` is omitted, the inspector selects the newest available
-stable chart version. Pass `--target-version` to inspect a specific release.
+## Install
+
+Download a checksummed archive for Linux, macOS, or Windows from
+[GitHub Releases](https://github.com/imtpot/chart-release-inspector/releases),
+or install with Go as shown above.
+
+### mise
+
+Pin a release in project `mise.toml` for reproducible team installs:
+
+```toml
+[tools]
+"github:imtpot/chart-release-inspector" = "0.2.0"
+```
+
+```sh
+mise install
+mise exec -- chart-release-inspector version
+```
+
+mise can intentionally hide a freshly published release until it reaches the
+configured minimum release age. To install a new version immediately, use this
+one-time override while retaining the version pin above:
+
+```sh
+mise install --minimum-release-age 0d github:imtpot/chart-release-inspector@0.2.0
+```
+
+To build a local checkout:
+
+```sh
+go build -o bin/chart-release-inspector ./cmd/chart-release-inspector
+```
+
+## Upgrade Review
+
+The default terminal output is deliberately compact: version transitions first,
+then an optional values diff and release notes. Use JSON when another tool needs
+the report:
+
+```sh
+chart-release-inspector inspect \
+  --chart external-secrets \
+  --repository https://charts.external-secrets.io \
+  --current-version 2.1.0 \
+  --target-version 2.2.0 \
+  --values-diff \
+  --output json > external-secrets-2.2.0.json
+```
+
+`--output terminal` is the default. It respects `NO_COLOR`; use
+`--color always` or `--color never` when scripting terminal output.
 
 ## Batch Checks
 
-Run a manifest of independent chart checks and receive one JSON report:
+Keep chart checks in a portable manifest and run them in one command:
 
 ```sh
 chart-release-inspector batch --file charts.yaml > report.json
@@ -90,63 +124,16 @@ charts:
     current_version: 10.5.14
 ```
 
-Each `results` entry has the same schema as `inspect`. Checks run in manifest
-order; an error for one chart does not prevent the remaining charts from being
-inspected. Batch exits with `0` when every chart is current, `10` when at least
-one update is available and no chart failed, or `20` when any chart failed.
-Batch always writes its JSON report to stdout, so it can be redirected to a file
-or piped to another command.
-
-Use `--release-notes-config` and `--release-note-limit` with `batch` to apply
-the same optional GitHub release-note rules as an individual inspection. See
-[`charts.example.yaml`](charts.example.yaml) for a ready-to-run manifest.
-
-## Command Reference
-
-```text
-chart-release-inspector inspect [flags]
-chart-release-inspector config validate <release-notes.yaml>
-chart-release-inspector batch --file charts.yaml
-chart-release-inspector version
-```
-
-| Flag | Description |
-| --- | --- |
-| `--chart` | Required chart name for a Helm repository, or an `oci://` chart reference. |
-| `--repository` | Helm repository URL. Required for non-OCI charts. |
-| `--current-version` | Installed or currently configured chart version. |
-| `--target-version` | Specific target chart version. Defaults to the newest stable version. |
-| `--values-diff` | Compare the default packaged `values.yaml` files. |
-| `--release-note-limit` | Maximum number of release-note characters to return. `0` keeps the full body. |
-| `--release-notes-config` | YAML file containing chart-specific upstream release-note rules. |
-| `--output` | `terminal` (default) or `json`. |
-| `--color` | `auto` (default), `always`, or `never`. |
-
-Terminal output uses PTerm and follows `NO_COLOR`. JSON output contains no
-terminal formatting.
-
-`config validate` checks a release-notes configuration without contacting Helm
-or GitHub. `version` prints the binary version; development builds report `dev`.
-
-## Automation Contract
-
-Every JSON response includes `schema_version: 4` and a `status` value:
-
-| Status | Meaning | Exit code |
-| --- | --- | --- |
-| `current` | The selected target is already current. | `0` |
-| `update_available` | A newer target is available. | `10` |
-| `error` | Input validation or an upstream lookup failed. | `20` |
-
-JSON is emitted even when the command exits with `20`. `values_diff` and each
-release's `body_preview` are arrays of lines, avoiding escaped multiline YAML
-and Markdown. The `body_characters` and `truncated` fields describe the complete
-upstream release body.
+Every manifest entry is inspected in order. A failing chart does not prevent
+the other checks from completing. Batch always writes JSON to stdout, making it
+easy to redirect, archive, or pass to another command. Start with the
+ready-to-run [`charts.example.yaml`](charts.example.yaml).
 
 ## Release Notes
 
-GitHub release notes are optional. Configure a chart-to-upstream mapping with
-`--release-notes-config`:
+The inspector uses a chart's metadata by default. Add a release-notes rule when
+an upstream project uses a different GitHub repository, tag prefix, or version
+source:
 
 ```yaml
 rules:
@@ -157,23 +144,68 @@ rules:
     version: application
 ```
 
-`version` is `application` by default and can be set to `chart`. The tag
-template receives the resolved version as `{version}`. See
-[`release-notes.example.yaml`](release-notes.example.yaml) for more examples.
-
-Set `GITHUB_TOKEN` (preferred) or `GH_TOKEN` to raise GitHub API limits:
+Use the configuration with either `inspect` or `batch`:
 
 ```sh
-export GITHUB_TOKEN="$(gh auth token)"
-chart-release-inspector inspect ...
+chart-release-inspector batch \
+  --file charts.yaml \
+  --release-notes-config release-notes.yaml \
+  --release-note-limit 2000 > report.json
 ```
 
-The token is read only from the environment and is never written to command
-output. If GitHub API traversal is unavailable, the inspector falls back to the
-target release's public page and reports the degraded result in
-`release_notes_error`.
+`version` defaults to `application`; set it to `chart` for projects that publish
+chart-version release notes. Validate configuration without any network calls:
 
-## Development
+```sh
+chart-release-inspector config validate release-notes.yaml
+```
+
+See [`release-notes.example.yaml`](release-notes.example.yaml) for additional
+rules. Set `GITHUB_TOKEN` (preferred) or `GH_TOKEN` to raise GitHub API limits.
+Tokens are read only from the environment and are never written to output.
+
+## Automation Contract
+
+All JSON output is pretty-printed and stable for automation. Individual inspect
+reports use `schema_version: 4`; batch envelopes use `schema_version: 1`, and
+their `results` entries use the individual schema.
+
+| Status | Meaning | Exit code |
+| --- | --- | --- |
+| `current` | The selected target is already current. | `0` |
+| `update_available` | A newer target is available. | `10` |
+| `error` | Input validation or an upstream lookup failed. | `20` |
+
+JSON is still emitted when a command exits with `20`. `values_diff` and release
+note `body_preview` values are arrays of lines, not escaped multiline strings.
+`body_characters` and `truncated` describe the complete upstream release body.
+
+## Commands
+
+```text
+chart-release-inspector inspect [flags]
+chart-release-inspector batch --file charts.yaml
+chart-release-inspector config validate <release-notes.yaml>
+chart-release-inspector version
+```
+
+| Flag | Description |
+| --- | --- |
+| `--chart` | Helm chart name or `oci://` chart reference. |
+| `--repository` | Helm repository URL; required for a non-OCI chart. |
+| `--current-version` | Installed or configured chart version. |
+| `--target-version` | Target chart version; defaults to the newest stable release. |
+| `--values-diff` | Compare packaged default `values.yaml` files. |
+| `--release-note-limit` | Maximum returned release-note characters; `0` keeps the full body. |
+| `--release-notes-config` | YAML configuration for chart-specific upstream release rules. |
+| `--output` | `terminal` (default) or `json`; applies to `inspect`. |
+| `--color` | `auto` (default), `always`, or `never`; applies to terminal output. |
+
+## Contributing
+
+Contributions that improve chart compatibility, release-note conventions,
+documentation, and automation integration are welcome. Keep the tool neutral:
+it should inspect charts, not depend on a particular deployment system.
 
 ```sh
 go test ./...
@@ -182,5 +214,8 @@ go build ./cmd/chart-release-inspector
 ```
 
 GitHub Actions runs the same checks for pull requests and pushes to `main`.
-Pushing a tag in the form `vX.Y.Z` invokes GoReleaser to publish checksummed
-Linux, macOS, and Windows archives.
+Tags matching `vX.Y.Z` publish checksummed archives through GoReleaser.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
