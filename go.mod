@@ -1,4 +1,4 @@
-module chart-release-inspector
+module github.com/imtpot/chart-release-inspector
 
 go 1.26.0
 

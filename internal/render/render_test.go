@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"chart-release-inspector/internal/inspector"
+	"github.com/imtpot/chart-release-inspector/internal/inspector"
 )
 
 func TestHumanPlainOutputIncludesReleaseNotes(t *testing.T) {

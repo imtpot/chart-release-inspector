@@ -9,8 +9,8 @@ import (
 
 	"golang.org/x/term"
 
-	"chart-release-inspector/internal/inspector"
-	"chart-release-inspector/internal/render"
+	"github.com/imtpot/chart-release-inspector/internal/inspector"
+	"github.com/imtpot/chart-release-inspector/internal/render"
 )
 
 const (

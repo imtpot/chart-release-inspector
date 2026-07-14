@@ -7,7 +7,7 @@ import (
 
 	"github.com/pterm/pterm"
 
-	"chart-release-inspector/internal/inspector"
+	"github.com/imtpot/chart-release-inspector/internal/inspector"
 )
 
 // Options controls the terminal rendering policy selected by the CLI adapter.
