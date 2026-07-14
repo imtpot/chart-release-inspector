@@ -131,18 +131,21 @@ ready-to-run [`charts.example.yaml`](charts.example.yaml).
 
 ## Release Notes
 
-The inspector uses a chart's metadata by default. Add a release-notes rule when
-an upstream project uses a different GitHub repository, tag prefix, or version
-source:
+The inspector first uses the chart's metadata to locate release notes. Add a
+rule when the Helm chart repository and the application release repository are
+different, or when upstream uses a different tag prefix or version source.
+
+For example, the chart is named `mimir-distributed`, but application release
+notes belong to Grafana Mimir at `https://github.com/grafana/mimir`:
 
 ```yaml
 rules:
   # Match the Helm chart name, not the upstream application name.
-  - chart: ingress-nginx
+  - chart: mimir-distributed
     # GitHub repository with the upstream release notes.
-    repository: https://github.com/kubernetes/ingress-nginx
-    # Upstream release tags are controller-v1.14.0, not v1.14.0.
-    tag_template: controller-v{version}
+    repository: https://github.com/grafana/mimir
+    # Upstream application tags are mimir-3.1.0, not v3.1.0.
+    tag_template: mimir-{version}
 ```
 
 Use the configuration with either `inspect` or `batch`:
