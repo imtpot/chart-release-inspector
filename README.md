@@ -4,13 +4,26 @@
 [![Release](https://img.shields.io/github/v/release/imtpot/chart-release-inspector?display_name=tag&sort=semver)](https://github.com/imtpot/chart-release-inspector/releases)
 [![License](https://img.shields.io/github/license/imtpot/chart-release-inspector)](LICENSE)
 
-**Know what changes before your Helm chart does.**
+**Machine-readable upgrade intelligence for Helm charts.**
 
-`chart-release-inspector` is a standalone CLI for reviewing Helm repository and OCI chart upgrades. It resolves chart versions, detects application transitions, diffs packaged `values.yaml`, and aggregates upstream GitHub changelogs—all **without** contacting your Kubernetes cluster or applying any changes.
-
-Designed for humans making upgrade decisions and CI/CD pipelines that require a stable JSON contract.
+`chart-release-inspector` gives both human engineers and AI agents everything they need to safely upgrade Helm and OCI charts. It resolves versions, detects application transitions, diffs packaged `values.yaml`, and aggregates upstream GitHub changelogs into a clean terminal report or a stable, structured JSON contract—all **without** contacting your Kubernetes cluster.
 
 ![Chart Release Inspector Screenshot](assets/screenshot.png)
+
+---
+
+### 🔄 The Upgrade Workflow Shift
+
+```
+Traditional Workflow (Human-centric):
+
+  Engineer ──> Read release notes ──> Compare values ──> Search breaking changes ──> Update values ──> Deploy
+
+
+AI-Agent Workflow (Automated):
+
+  AI Agent ──> chart-release-inspector ──> Structured JSON ──> Migration plan ──> Update values.yaml ──> PR
+```
 
 ---
 
@@ -26,11 +39,11 @@ Designed for humans making upgrade decisions and CI/CD pipelines that require a 
 
 ## 🤖 AI & Agent Friendly
 
-`chart-release-inspector` is optimized for integration with LLM coding assistants, autonomous agents, and GitOps workflows:
+`chart-release-inspector` is built to be a high-quality, stable structured data provider for LLMs, autonomous coding agents, and GitOps pipelines:
 
-*   **Structured Context for LLMs:** Returns version history, value diffs, and changelogs in a clean, deterministic JSON format—perfect to feed directly into agent contexts or LLM prompts.
-*   **Automated PR Summaries:** Run the inspector in CI/CD to let your AI agents automatically analyze upstream Helm changes, highlight key configuration shifts, and write high-quality pull request summaries.
+*   **No "AI Inside" Bloat:** The tool does not call LLMs itself. It provides clean, structured, and complete context (version history, value diffs, and changelogs) in a deterministic JSON format, perfect to feed directly into agent prompts.
 *   **Predictable Scripting:** Simple semantic exit codes allow agents to make fast branching decisions (e.g., `0` = success, `20` = error; pass `--fail-on-update` to exit `10` on available updates) without parsing raw logs.
+*   **Automated PR Summaries:** Run the inspector in CI/CD to let your AI agents automatically analyze upstream Helm changes, highlight key configuration shifts, and write high-quality pull request summaries.
 
 ---
 
@@ -38,15 +51,21 @@ Designed for humans making upgrade decisions and CI/CD pipelines that require a 
 
 ### 1. Install
 
+**Via [mise](https://mise.jdx.dev/):**
+```toml
+[tools]
+"github:imtpot/chart-release-inspector" = "0.7.0"
+```
+
 **Via Go:**
 ```sh
 go install github.com/imtpot/chart-release-inspector/cmd/chart-release-inspector@latest
 ```
 
-**Via [mise](https://mise.jdx.dev/):**
-```toml
-[tools]
-"github:imtpot/chart-release-inspector" = "0.7.0"
+**Direct Binary Download (CI/CD without Go/Mise):**
+Pre-built binaries for Linux, macOS, and Windows are available on the [GitHub Releases](https://github.com/imtpot/chart-release-inspector/releases) page. You can install the latest release directly via curl:
+```sh
+curl -sSfL https://raw.githubusercontent.com/imtpot/chart-release-inspector/main/install.sh | sh
 ```
 
 ---
