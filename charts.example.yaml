@@ -16,5 +16,6 @@ charts:
   - chart: external-secrets
     repository: https://charts.external-secrets.io
     version: 2.6.0
+    target_version: 2.7.0
   - chart: oci://ghcr.io/grafana/helm-charts/grafana
     version: 10.5.14

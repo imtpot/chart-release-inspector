@@ -245,12 +245,37 @@ func githubReleasePage(
 	if err != nil {
 		return nil, err
 	}
-	match := regexp.MustCompile(`(?s)<div[^>]+class="[^"]*markdown-body[^"]*"[^>]*>(.*?)</div>`).FindSubmatch(page)
-	if len(match) != 2 {
+	htmlContent := extractMarkdownBody(string(page))
+	if htmlContent == "" {
 		return nil, errors.New("release page did not contain release notes")
 	}
-	htmlContent := string(match[1])
 	htmlContent = strings.ReplaceAll(htmlContent, "\r", "")
+
+	// Convert <pre><code> blocks to markdown code blocks with placeholders for newlines
+	preCodeRegexp := regexp.MustCompile(`(?is)<pre[^>]*>\s*<code[^>]*>(.*?)</code>\s*</pre>`)
+	htmlContent = preCodeRegexp.ReplaceAllStringFunc(htmlContent, func(block string) string {
+		sub := preCodeRegexp.FindStringSubmatch(block)
+		if len(sub) == 2 {
+			codeContent := strings.ReplaceAll(sub[1], "\n", "__PRE_NEWLINE__")
+			return "__PRE_NEWLINE____PRE_NEWLINE__```__PRE_NEWLINE__" + codeContent + "__PRE_NEWLINE__```__PRE_NEWLINE____PRE_NEWLINE__"
+		}
+		return block
+	})
+
+	// Convert standalone <pre> blocks as well, just in case
+	preRegexp := regexp.MustCompile(`(?is)<pre[^>]*>(.*?)</pre>`)
+	htmlContent = preRegexp.ReplaceAllStringFunc(htmlContent, func(block string) string {
+		sub := preRegexp.FindStringSubmatch(block)
+		if len(sub) == 2 {
+			if strings.Contains(sub[1], "```") {
+				return block // already converted
+			}
+			codeContent := strings.ReplaceAll(sub[1], "\n", "__PRE_NEWLINE__")
+			return "__PRE_NEWLINE____PRE_NEWLINE__```__PRE_NEWLINE__" + codeContent + "__PRE_NEWLINE__```__PRE_NEWLINE____PRE_NEWLINE__"
+		}
+		return block
+	})
+
 	htmlContent = strings.ReplaceAll(htmlContent, "\n", " ")
 	htmlContent = regexp.MustCompile(`(?i)<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>`).ReplaceAllString(htmlContent, "$2")
 	htmlContent = regexp.MustCompile(`(?i)<strong>(.*?)</strong>`).ReplaceAllString(htmlContent, "**$1**")
@@ -260,22 +285,37 @@ func githubReleasePage(
 	htmlContent = regexp.MustCompile(`(?i)<li>`).ReplaceAllString(htmlContent, "- ")
 	htmlContent = regexp.MustCompile(`(?i)</(li|tr)>`).ReplaceAllString(htmlContent, "\n")
 	htmlContent = regexp.MustCompile(`(?i)</(p|div|h[1-6]|pre|ul|ol)>`).ReplaceAllString(htmlContent, "\n\n")
+
 	body := regexp.MustCompile(`<[^>]+>`).ReplaceAllString(htmlContent, "")
+	body = strings.ReplaceAll(body, "__PRE_NEWLINE__", "\n")
 	body = html.UnescapeString(body)
 
 	var lines []string
 	previousBlank := false
+	inCodeBlock := false
 	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			if previousBlank || len(lines) == 0 {
-				continue
-			}
-			previousBlank = true
-		} else {
+		if strings.HasPrefix(line, "```") {
+			inCodeBlock = !inCodeBlock
+			lines = append(lines, line)
 			previousBlank = false
+			continue
 		}
-		lines = append(lines, trimmed)
+		if inCodeBlock {
+			trimmed := strings.TrimRight(line, " \t\r")
+			lines = append(lines, trimmed)
+			previousBlank = false
+		} else {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				if previousBlank || len(lines) == 0 {
+					continue
+				}
+				previousBlank = true
+			} else {
+				previousBlank = false
+			}
+			lines = append(lines, trimmed)
+		}
 	}
 	bodyCleaned := strings.Join(lines, "\n")
 	excerpt, truncated := truncateRunes(bodyCleaned, excerptLimit)
@@ -298,4 +338,35 @@ func releaseTag(version, template string) (string, bool) {
 
 func githubToken() string {
 	return firstNonEmpty(os.Getenv("GITHUB_TOKEN"), os.Getenv("GH_TOKEN"))
+}
+
+func extractMarkdownBody(htmlContent string) string {
+	idx := strings.Index(htmlContent, `class="markdown-body`)
+	if idx == -1 {
+		return ""
+	}
+	startIdx := strings.LastIndex(htmlContent[:idx], "<div")
+	if startIdx == -1 {
+		return ""
+	}
+
+	content := htmlContent[startIdx:]
+	depth := 0
+	pos := 0
+
+	for pos < len(content) {
+		if strings.HasPrefix(content[pos:], "<div ") || strings.HasPrefix(content[pos:], "<div>") {
+			depth++
+			pos += 4
+		} else if strings.HasPrefix(content[pos:], "</div>") {
+			depth--
+			pos += 6
+			if depth == 0 {
+				return content[:pos]
+			}
+		} else {
+			pos++
+		}
+	}
+	return ""
 }

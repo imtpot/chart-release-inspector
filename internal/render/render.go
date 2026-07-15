@@ -28,7 +28,6 @@ func Human(writer io.Writer, result inspector.BatchResult, options Options) erro
 	}
 
 	isSingle := len(result.Results) == 1
-	hasDetailsSection := false
 
 	for _, res := range result.Results {
 		if res.Error != "" {
@@ -39,10 +38,6 @@ func Human(writer io.Writer, result inspector.BatchResult, options Options) erro
 			hasNotes := len(res.Releases) > 0
 
 			if hasDiff || hasNotes {
-				if !hasDetailsSection {
-					fmt.Fprintln(writer)
-					hasDetailsSection = true
-				}
 				if !isSingle {
 					header := fmt.Sprintf("--- Details for %s ---", res.Chart)
 					if options.Color {
@@ -50,16 +45,24 @@ func Human(writer io.Writer, result inspector.BatchResult, options Options) erro
 					}
 					fmt.Fprintln(writer, header)
 				}
+				detailsPrinted := false
 				if hasDiff {
 					renderValuesDiff(writer, res, options)
+					detailsPrinted = true
 				}
 				if hasNotes {
+					if detailsPrinted {
+						fmt.Fprintln(writer)
+					}
 					section := "Release notes"
 					if options.Color {
 						section = pterm.NewStyle(pterm.Bold, pterm.FgLightCyan).Sprint(section)
 					}
-					fmt.Fprintf(writer, "\n%s\n", section)
-					for _, release := range res.Releases {
+					fmt.Fprintln(writer, section)
+					for i, release := range res.Releases {
+						if i > 0 {
+							fmt.Fprintln(writer)
+						}
 						if err := renderRelease(writer, release, options); err != nil {
 							return err
 						}
@@ -83,7 +86,7 @@ func Warning(writer io.Writer, message string, color bool) {
 	if color {
 		text = pterm.FgYellow.Sprint(text)
 	}
-	fmt.Fprintln(writer, text)
+	fmt.Fprintf(writer, "\n%s\n", text)
 }
 
 func renderTable(writer io.Writer, result inspector.BatchResult, options Options) error {
@@ -139,7 +142,7 @@ func renderValuesDiff(writer io.Writer, result inspector.Result, options Options
 	if options.Color {
 		section = pterm.NewStyle(pterm.Bold, pterm.FgLightCyan).Sprint(section)
 	}
-	fmt.Fprintf(writer, "\n%s\n", section)
+	fmt.Fprintln(writer, section)
 	if result.ValuesDiffError != "" {
 		message := "Unable to compare values.yaml: " + result.ValuesDiffError
 		if options.Color {
@@ -172,7 +175,7 @@ func renderRelease(writer io.Writer, release inspector.ReleaseNote, options Opti
 	if options.Color {
 		label = pterm.NewStyle(pterm.Bold, pterm.FgGreen).Sprint(label)
 	}
-	fmt.Fprintf(writer, "\n%s\n", label)
+	fmt.Fprintln(writer, label)
 	if len(release.BodyPreview) > 0 {
 		fmt.Fprintln(writer, renderMarkdown(strings.Join(release.BodyPreview, "\n"), options.Color))
 	}
@@ -186,13 +189,15 @@ func renderRelease(writer io.Writer, release inspector.ReleaseNote, options Opti
 	return nil
 }
 
-
 func renderMarkdown(markdown string, color bool) string {
 	var rendered strings.Builder
 	inCodeBlock := false
 	inComment := false
+
 	for _, line := range strings.Split(markdown, "\n") {
 		trimmed := strings.TrimSpace(line)
+
+		// Skip HTML comments
 		if strings.HasPrefix(trimmed, "<!--") {
 			inComment = !strings.Contains(trimmed, "-->")
 			continue
@@ -203,25 +208,33 @@ func renderMarkdown(markdown string, color bool) string {
 			}
 			continue
 		}
+
+		// Track and retain code blocks
 		if strings.HasPrefix(trimmed, "```") {
 			inCodeBlock = !inCodeBlock
+			if color {
+				line = pterm.FgGray.Sprint(line)
+			}
+			rendered.WriteString(line + "\n")
 			continue
 		}
+
 		if inCodeBlock {
 			line = "  " + line
 			if color {
 				line = pterm.FgGray.Sprint(line)
 			}
-		} else if strings.HasPrefix(trimmed, "#") {
-			line = strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
-			if color {
-				line = pterm.NewStyle(pterm.Bold, pterm.FgLightCyan).Sprint(line)
+		} else {
+			// Color markdown headers
+			if strings.HasPrefix(trimmed, "#") {
+				if color {
+					line = pterm.NewStyle(pterm.Bold, pterm.FgLightCyan).Sprint(line)
+				}
 			}
-		} else if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
-			line = "- " + strings.TrimSpace(trimmed[2:])
 		}
-		rendered.WriteString(line)
-		rendered.WriteByte('\n')
+
+		rendered.WriteString(line + "\n")
 	}
+
 	return strings.TrimSpace(rendered.String())
 }

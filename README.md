@@ -92,6 +92,16 @@ Export as JSON for automation:
 chart-release-inspector batch --file charts.example.yaml --output json > report.json
 ```
 
+### Batch Manifest Chart Reference
+
+Each entry under `charts:` supports the following fields:
+
+*   `chart` (required): Helm chart name or OCI registry URL reference.
+*   `version` (required): The current/installed version to inspect from.
+*   `target_version` (optional): The specific version to inspect upgrade to. If omitted, queries the latest stable upstream version.
+*   `repository` (optional): Helm repository URL (only for non-OCI charts).
+*   `values_diff` (optional): Set to `true` to always compute and show the values diff for this chart.
+
 ---
 
 ## Smart Release Notes Mapping
