@@ -12,17 +12,14 @@
 
 ---
 
-### 🔄 The Upgrade Workflow Shift
+### The Upgrade Workflow Shift
 
 ```
-Traditional Workflow (Human-centric):
-
-  Engineer ──> Read release notes ──> Compare values ──> Search breaking changes ──> Update values ──> Deploy
-
+Traditional Workflow (Human):
+  Read Notes ──> Compare Values ──> Find Breaking Changes ──> Update ──> Deploy
 
 AI-Agent Workflow (Automated):
-
-  AI Agent ──> chart-release-inspector ──> Structured JSON ──> Migration plan ──> Update values.yaml ──> PR
+  chart-release-inspector ──> Structured JSON ──> Migration Plan ──> PR
 ```
 
 ---
@@ -62,11 +59,8 @@ AI-Agent Workflow (Automated):
 go install github.com/imtpot/chart-release-inspector/cmd/chart-release-inspector@latest
 ```
 
-**Direct Binary Download (CI/CD without Go/Mise):**
-Pre-built binaries for Linux, macOS, and Windows are available on the [GitHub Releases](https://github.com/imtpot/chart-release-inspector/releases) page. You can install the latest release directly via curl:
-```sh
-curl -sSfL https://raw.githubusercontent.com/imtpot/chart-release-inspector/main/install.sh | sh
-```
+**Direct Binary Download:**
+Pre-built binaries for Linux, macOS, and Windows are available on the [GitHub Releases](https://github.com/imtpot/chart-release-inspector/releases) page. Download the appropriate binary for your platform and place it in your system `PATH`.
 
 ---
 
