@@ -34,7 +34,7 @@ AI-Agent Workflow (Automated):
 
 ---
 
-## 🤖 AI & Agent Friendly
+## AI & Agent Friendly
 
 `chart-release-inspector` is built to be a high-quality, stable structured data provider for LLMs, autonomous coding agents, and GitOps pipelines:
 
