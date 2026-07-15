@@ -27,9 +27,12 @@ func TestHumanPlainOutputIncludesReleaseNotes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"Source: Helm repository",
-		"Chart: 1.0.0 -> 1.1.0",
-		"Application: v1.0.0 -> v1.1.0",
+		"Chart",
+		"Chart Version",
+		"App Version",
+		"Status",
+		"1.0.0 -> 1.1.0",
+		"v1.0.0 -> v1.1.0",
 		"Release notes",
 		"1.1.0: https://example.test/releases/1.1.0",
 		"Breaking change",

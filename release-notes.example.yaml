@@ -1,7 +1,0 @@
-rules:
-  - chart: external-secrets
-    repository: https://github.com/external-secrets/external-secrets
-    tag_template: v{version}
-  - chart: ingress-nginx
-    repository: https://github.com/kubernetes/ingress-nginx
-    tag_template: controller-v{version}

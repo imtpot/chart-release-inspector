@@ -17,16 +17,61 @@ type Options struct {
 }
 
 // Human prints a readable inspection report without changing the JSON contract.
-// It dynamically chooses detailed single-chart rendering or a summary table.
+// It displays a status summary table and prints values diffs and release notes underneath.
 func Human(writer io.Writer, result inspector.BatchResult, options Options) error {
 	if result.Error != "" {
 		fmt.Fprintf(writer, "Error: %s\n", result.Error)
 		return nil
 	}
-	if len(result.Results) == 1 {
-		return renderSingle(writer, result.Results[0], options)
+	if err := renderTable(writer, result, options); err != nil {
+		return err
 	}
-	return renderTable(writer, result, options)
+
+	isSingle := len(result.Results) == 1
+	hasDetailsSection := false
+
+	for _, res := range result.Results {
+		if res.Error != "" {
+			continue
+		}
+		if res.Status == inspector.StatusUpdate || isSingle {
+			hasDiff := res.ValuesDiffChanged != nil
+			hasNotes := len(res.Releases) > 0
+
+			if hasDiff || hasNotes {
+				if !hasDetailsSection {
+					fmt.Fprintln(writer)
+					hasDetailsSection = true
+				}
+				if !isSingle {
+					header := fmt.Sprintf("--- Details for %s ---", res.Chart)
+					if options.Color {
+						header = pterm.NewStyle(pterm.Bold, pterm.FgLightCyan).Sprint(header)
+					}
+					fmt.Fprintln(writer, header)
+				}
+				if hasDiff {
+					renderValuesDiff(writer, res, options)
+				}
+				if hasNotes {
+					section := "Release notes"
+					if options.Color {
+						section = pterm.NewStyle(pterm.Bold, pterm.FgLightCyan).Sprint(section)
+					}
+					fmt.Fprintf(writer, "\n%s\n", section)
+					for _, release := range res.Releases {
+						if err := renderRelease(writer, release, options); err != nil {
+							return err
+						}
+					}
+				}
+				if !isSingle {
+					fmt.Fprintln(writer)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // Warning writes a release-note diagnostic to the error stream.
@@ -39,29 +84,6 @@ func Warning(writer io.Writer, message string, color bool) {
 		text = pterm.FgYellow.Sprint(text)
 	}
 	fmt.Fprintln(writer, text)
-}
-
-func renderSingle(writer io.Writer, result inspector.Result, options Options) error {
-	if result.Error != "" {
-		fmt.Fprintf(writer, "Error: %s\n", result.Error)
-		return nil
-	}
-	renderSingleSummary(writer, result, options)
-	renderValuesDiff(writer, result, options)
-	if len(result.Releases) == 0 {
-		return nil
-	}
-	section := "Release notes"
-	if options.Color {
-		section = pterm.NewStyle(pterm.Bold, pterm.FgLightCyan).Sprint(section)
-	}
-	fmt.Fprintf(writer, "\n%s\n", section)
-	for _, release := range result.Releases {
-		if err := renderRelease(writer, release, options); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func renderTable(writer io.Writer, result inspector.BatchResult, options Options) error {
@@ -164,39 +186,6 @@ func renderRelease(writer io.Writer, release inspector.ReleaseNote, options Opti
 	return nil
 }
 
-func renderSingleSummary(writer io.Writer, result inspector.Result, options Options) {
-	source := sourceLabel(result.SourceType)
-	chart := result.ChartVersion + " -> " + result.TargetChartVersion
-	application := result.AppVersion + " -> " + result.TargetAppVersion
-	if options.Color {
-		labelStyle := pterm.NewStyle(pterm.Bold, pterm.FgLightCyan)
-		currentStyle := pterm.NewStyle(pterm.Bold, pterm.FgYellow)
-		targetStyle := pterm.NewStyle(pterm.Bold, pterm.FgGreen)
-		chart = currentStyle.Sprint(result.ChartVersion) + " -> " + targetStyle.Sprint(result.TargetChartVersion)
-		application = currentStyle.Sprint(result.AppVersion) + " -> " + targetStyle.Sprint(result.TargetAppVersion)
-		source = labelStyle.Sprint("Source:") + " " + source
-		chart = labelStyle.Sprint("Chart:") + " " + chart
-		application = labelStyle.Sprint("Application:") + " " + application
-	} else {
-		source = "Source: " + source
-		chart = "Chart: " + chart
-		application = "Application: " + application
-	}
-	fmt.Fprintln(writer, source)
-	fmt.Fprintln(writer, chart)
-	fmt.Fprintln(writer, application)
-}
-
-func sourceLabel(sourceType string) string {
-	switch sourceType {
-	case "helm_repository":
-		return "Helm repository"
-	case "oci_registry":
-		return "OCI registry"
-	default:
-		return sourceType
-	}
-}
 
 func renderMarkdown(markdown string, color bool) string {
 	var rendered strings.Builder

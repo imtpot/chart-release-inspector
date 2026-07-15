@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -14,73 +15,10 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
-	"go.yaml.in/yaml/v3"
 )
 
 var githubAPIBase = "https://api.github.com"
 var githubWebBase = "https://github.com"
-
-// ReleaseNotesConfig contains optional upstream-specific release conventions.
-type ReleaseNotesConfig struct {
-	Rules []ReleaseNoteRule `yaml:"rules"`
-}
-
-// ReleaseNoteRule matches a chart and describes its upstream release tags.
-type ReleaseNoteRule struct {
-	Chart       string `yaml:"chart"`
-	Provider    string `yaml:"provider"`
-	Repository  string `yaml:"repository"`
-	TagTemplate string `yaml:"tag_template"`
-	Version     string `yaml:"version"`
-}
-
-// LoadReleaseNotesConfig reads rules independent from any deployment system.
-func LoadReleaseNotesConfig(filename string) (ReleaseNotesConfig, error) {
-	contents, err := os.ReadFile(filename)
-	if err != nil {
-		return ReleaseNotesConfig{}, fmt.Errorf("read release notes config: %w", err)
-	}
-	var config ReleaseNotesConfig
-	if err := yaml.Unmarshal(contents, &config); err != nil {
-		return ReleaseNotesConfig{}, fmt.Errorf("parse release notes config: %w", err)
-	}
-	for _, rule := range config.Rules {
-		if rule.Chart == "" {
-			return ReleaseNotesConfig{}, fmt.Errorf("release note rule is missing chart")
-		}
-		if rule.Provider != "" && rule.Provider != "github" && rule.Provider != "none" {
-			return ReleaseNotesConfig{}, fmt.Errorf("unsupported release note provider %q", rule.Provider)
-		}
-		if rule.Provider == "github" && rule.Repository == "" {
-			return ReleaseNotesConfig{}, fmt.Errorf("GitHub release note rule for %q is missing repository", rule.Chart)
-		}
-		if rule.Repository != "" && githubRepository(rule.Repository) == "" {
-			return ReleaseNotesConfig{}, fmt.Errorf(
-				"release note repository for %q must be a full GitHub URL",
-				rule.Chart,
-			)
-		}
-		if rule.Version != "" && rule.Version != "application" && rule.Version != "chart" {
-			return ReleaseNotesConfig{}, fmt.Errorf("release note rule for %q has invalid version type %q", rule.Chart, rule.Version)
-		}
-	}
-	return config, nil
-}
-
-// RuleForChart returns the first matching rule for a Helm chart reference.
-func (config ReleaseNotesConfig) RuleForChart(chart string) ReleaseNoteRule {
-	name := chartName(chart)
-	for _, rule := range config.Rules {
-		if rule.Chart == name {
-			return rule
-		}
-	}
-	return ReleaseNoteRule{}
-}
-
-func chartName(chart string) string {
-	return strings.TrimSuffix(chart[strings.LastIndex(chart, "/")+1:], "/")
-}
 
 type githubRelease struct {
 	TagName string `json:"tag_name"`
@@ -94,6 +32,7 @@ func githubReleaseNotes(
 	source, currentVersion, targetVersion string,
 	excerptLimit int,
 	skip bool,
+	githubClient string,
 ) ([]ReleaseNote, string) {
 	if skip || rule.Provider == "none" || targetVersion == "" {
 		return []ReleaseNote{}, ""
@@ -105,8 +44,21 @@ func githubReleaseNotes(
 	if repository == "" {
 		return []ReleaseNote{}, ""
 	}
+
+	if githubClient == "html" {
+		fallback, fallbackErr := githubReleasePage(ctx, repository, targetVersion, rule.TagTemplate, excerptLimit)
+		if fallbackErr == nil {
+			return fallback, ""
+		}
+		return []ReleaseNote{}, fmt.Sprintf("HTML release page scraping failed: %v", fallbackErr)
+	}
+
 	releases, err := listGitHubReleases(ctx, repository)
 	if err != nil {
+		if githubClient == "api" {
+			return []ReleaseNote{}, fmt.Sprintf("GitHub API error: %v", err)
+		}
+		// auto mode: fallback to HTML scraping
 		fallback, fallbackErr := githubReleasePage(ctx, repository, targetVersion, rule.TagTemplate, excerptLimit)
 		if fallbackErr == nil {
 			return fallback, fmt.Sprintf("%v; used GitHub release page fallback", err)
@@ -297,13 +249,40 @@ func githubReleasePage(
 	if len(match) != 2 {
 		return nil, errors.New("release page did not contain release notes")
 	}
-	body := strings.TrimSpace(regexp.MustCompile(`<[^>]+>`).ReplaceAllString(string(match[1]), " "))
-	body = strings.Join(strings.Fields(body), " ")
-	excerpt, truncated := truncateRunes(body, excerptLimit)
+	htmlContent := string(match[1])
+	htmlContent = strings.ReplaceAll(htmlContent, "\r", "")
+	htmlContent = strings.ReplaceAll(htmlContent, "\n", " ")
+	htmlContent = regexp.MustCompile(`(?i)<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>`).ReplaceAllString(htmlContent, "$2")
+	htmlContent = regexp.MustCompile(`(?i)<strong>(.*?)</strong>`).ReplaceAllString(htmlContent, "**$1**")
+	htmlContent = regexp.MustCompile(`(?i)<em>(.*?)</em>`).ReplaceAllString(htmlContent, "*$1*")
+	htmlContent = regexp.MustCompile(`(?i)<code>(.*?)</code>`).ReplaceAllString(htmlContent, "`$1`")
+	htmlContent = regexp.MustCompile(`(?i)<br\s*/?>`).ReplaceAllString(htmlContent, "\n")
+	htmlContent = regexp.MustCompile(`(?i)<li>`).ReplaceAllString(htmlContent, "- ")
+	htmlContent = regexp.MustCompile(`(?i)</(li|tr)>`).ReplaceAllString(htmlContent, "\n")
+	htmlContent = regexp.MustCompile(`(?i)</(p|div|h[1-6]|pre|ul|ol)>`).ReplaceAllString(htmlContent, "\n\n")
+	body := regexp.MustCompile(`<[^>]+>`).ReplaceAllString(htmlContent, "")
+	body = html.UnescapeString(body)
+
+	var lines []string
+	previousBlank := false
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if previousBlank || len(lines) == 0 {
+				continue
+			}
+			previousBlank = true
+		} else {
+			previousBlank = false
+		}
+		lines = append(lines, trimmed)
+	}
+	bodyCleaned := strings.Join(lines, "\n")
+	excerpt, truncated := truncateRunes(bodyCleaned, excerptLimit)
 	return []ReleaseNote{{
 		Version:     version,
 		URL:         fmt.Sprintf("%s/%s/releases/tag/%s", githubWebBase, repository, tag),
-		BodyPreview: previewLines(excerpt), BodyCharacters: len([]rune(body)), Truncated: truncated,
+		BodyPreview: previewLines(excerpt), BodyCharacters: len([]rune(bodyCleaned)), Truncated: truncated,
 	}}, nil
 }
 

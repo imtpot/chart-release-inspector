@@ -33,6 +33,7 @@ type Input struct {
 	ReleaseNoteLimit int
 	ReleaseNoteRule  ReleaseNoteRule
 	SkipReleaseNotes bool
+	GitHubClient     string
 }
 
 const (
@@ -120,7 +121,7 @@ func Inspect(ctx context.Context, input Input) Result {
 	result.TargetAppVersion = applicationVersion(target)
 	currentReleaseVersion := result.AppVersion
 	targetReleaseVersion := result.TargetAppVersion
-	if input.ReleaseNoteRule.Version == "chart" {
+	if input.ReleaseNoteRule.TagSource == "chart_version" {
 		currentReleaseVersion = result.ChartVersion
 		targetReleaseVersion = result.TargetChartVersion
 	}
@@ -132,6 +133,7 @@ func Inspect(ctx context.Context, input Input) Result {
 		targetReleaseVersion,
 		input.ReleaseNoteLimit,
 		input.SkipReleaseNotes,
+		input.GitHubClient,
 	)
 	if input.IncludeDiff {
 		changed := false

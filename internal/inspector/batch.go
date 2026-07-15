@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"go.yaml.in/yaml/v3"
@@ -11,18 +12,43 @@ import (
 
 const BatchSchemaVersion = 2
 
+// ReleaseNoteRule matches a chart and describes its upstream release tags.
+type ReleaseNoteRule struct {
+	Chart       string `yaml:"chart"`
+	Provider    string `yaml:"provider"`
+	Repository  string `yaml:"repository"`
+	TagTemplate string `yaml:"tag_template"`
+	TagSource   string `yaml:"tag_source"`
+}
+
+func chartName(chart string) string {
+	return strings.TrimSuffix(chart[strings.LastIndex(chart, "/")+1:], "/")
+}
+
 // BatchManifest declares chart inspections without coupling them to a deployment system.
 type BatchManifest struct {
-	Charts []BatchChart `yaml:"charts"`
+	Rules  []ReleaseNoteRule `yaml:"rules"`
+	Charts []BatchChart      `yaml:"charts"`
+}
+
+// RuleForChart returns the first matching rule for a Helm chart reference.
+func (m BatchManifest) RuleForChart(chart string) ReleaseNoteRule {
+	name := chartName(chart)
+	for _, rule := range m.Rules {
+		if rule.Chart == name {
+			return rule
+		}
+	}
+	return ReleaseNoteRule{}
 }
 
 // BatchChart describes one chart inspection in a batch manifest.
 type BatchChart struct {
-	Chart      string `yaml:"chart"`
-	Repository string `yaml:"repository"`
-	Version    string `yaml:"version"`
+	Chart         string `yaml:"chart"`
+	Repository    string `yaml:"repository"`
+	Version       string `yaml:"version"`
 	TargetVersion string `yaml:"target_version"`
-	ValuesDiff bool   `yaml:"values_diff"`
+	ValuesDiff    bool   `yaml:"values_diff"`
 }
 
 // BatchResult aggregates independent chart inspection results in manifest order.
@@ -50,6 +76,9 @@ func LoadBatchManifest(filename string) (BatchManifest, error) {
 	if len(manifest.Charts) == 0 {
 		return BatchManifest{}, fmt.Errorf("batch manifest must contain at least one chart")
 	}
+	if err := validateRules(manifest.Rules); err != nil {
+		return BatchManifest{}, err
+	}
 	return manifest, nil
 }
 
@@ -57,9 +86,10 @@ func LoadBatchManifest(filename string) (BatchManifest, error) {
 func InspectBatch(
 	ctx context.Context,
 	manifest BatchManifest,
-	releaseNotesConfig ReleaseNotesConfig,
 	releaseNoteLimit int,
 	skipReleaseNotes bool,
+	globalValuesDiff bool,
+	globalGitHubClient string,
 ) BatchResult {
 	result := BatchResult{
 		SchemaVersion: BatchSchemaVersion,
@@ -77,10 +107,11 @@ func InspectBatch(
 				Repository:       c.Repository,
 				Version:          c.Version,
 				TargetVersion:    c.TargetVersion,
-				IncludeDiff:      c.ValuesDiff,
+				IncludeDiff:      c.ValuesDiff || globalValuesDiff,
 				ReleaseNoteLimit: releaseNoteLimit,
-				ReleaseNoteRule:  releaseNotesConfig.RuleForChart(c.Chart),
+				ReleaseNoteRule:  manifest.RuleForChart(c.Chart),
 				SkipReleaseNotes: skipReleaseNotes,
+				GitHubClient:     globalGitHubClient,
 			})
 		}(i, chart)
 	}
@@ -98,4 +129,28 @@ func InspectBatch(
 	}
 
 	return result
+}
+
+func validateRules(rules []ReleaseNoteRule) error {
+	for _, rule := range rules {
+		if rule.Chart == "" {
+			return fmt.Errorf("release note rule is missing chart")
+		}
+		if rule.Provider != "" && rule.Provider != "github" && rule.Provider != "none" {
+			return fmt.Errorf("unsupported release note provider %q", rule.Provider)
+		}
+		if rule.Provider == "github" && rule.Repository == "" {
+			return fmt.Errorf("GitHub release note rule for %q is missing repository", rule.Chart)
+		}
+		if rule.Repository != "" && githubRepository(rule.Repository) == "" {
+			return fmt.Errorf(
+				"release note repository for %q must be a full GitHub URL",
+				rule.Chart,
+			)
+		}
+		if rule.TagSource != "" && rule.TagSource != "app_version" && rule.TagSource != "chart_version" {
+			return fmt.Errorf("release note rule for %q has invalid tag_source %q (expected app_version or chart_version)", rule.Chart, rule.TagSource)
+		}
+	}
+	return nil
 }

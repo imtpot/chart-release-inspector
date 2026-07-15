@@ -33,8 +33,8 @@ func main() {
 		batch(os.Args[2:])
 	case "version":
 		fmt.Println(version)
-	case "config":
-		validateConfig(os.Args[2:])
+	case "manifest":
+		validateManifest(os.Args[2:])
 	default:
 		printUsage(os.Stderr)
 		os.Exit(2)
@@ -42,47 +42,43 @@ func main() {
 }
 
 type Config struct {
-	Chart              string
-	Repository         string
-	Version            string
-	TargetVersion      string
-	ValuesDiff         bool
-	Filename           string
-	ReleaseNoteLimit   int
-	ReleaseNotesConfig string
-	SkipReleaseNotes   bool
-	FailOnUpdate       bool
-	Output             string
-	ColorMode          string
-	Color              bool
-	ReleaseNotes       inspector.ReleaseNotesConfig
+	Chart            string
+	Repository       string
+	Version          string
+	TargetVersion    string
+	ValuesDiff       bool
+	Filename         string
+	ReleaseNoteLimit int
+	ReleaseNotes     bool
+	FailOnUpdate     bool
+	Output           string
+	ColorMode        string
+	Color            bool
+	GitHubClient     string
 }
 
 func (c *Config) RegisterShared(flags *flag.FlagSet) {
 	flags.IntVar(&c.ReleaseNoteLimit, "release-note-limit", 2000, "maximum release-note characters; 0 keeps the complete body")
-	flags.StringVar(&c.ReleaseNotesConfig, "release-notes-config", "", "YAML file with chart-specific upstream release rules")
-	flags.BoolVar(&c.SkipReleaseNotes, "skip-release-notes", false, "skip fetching release notes")
+	flags.BoolVar(&c.ReleaseNotes, "release-notes", true, "fetch and display release notes")
+	flags.BoolVar(&c.ValuesDiff, "values-diff", false, "compare packaged values.yaml")
 	flags.BoolVar(&c.FailOnUpdate, "fail-on-update", false, "exit with code 10 when updates are available")
 	flags.StringVar(&c.Output, "output", "terminal", "output format: terminal or json")
 	flags.StringVar(&c.ColorMode, "color", "auto", "color mode: auto, always, or never")
+	flags.StringVar(&c.GitHubClient, "github-client", "auto", "GitHub client for release notes: auto, api, or html")
 }
 
 func (c *Config) ParseShared() error {
 	if !validOutput(c.Output) {
 		return fmt.Errorf("--output must be terminal or json")
 	}
+	if c.GitHubClient != "auto" && c.GitHubClient != "api" && c.GitHubClient != "html" {
+		return fmt.Errorf("invalid --github-client: must be auto, api, or html")
+	}
 	color, err := useColor(c.ColorMode)
 	if err != nil {
 		return err
 	}
 	c.Color = color
-	if c.ReleaseNotesConfig != "" {
-		config, err := inspector.LoadReleaseNotesConfig(c.ReleaseNotesConfig)
-		if err != nil {
-			return err
-		}
-		c.ReleaseNotes = config
-	}
 	return nil
 }
 
@@ -93,7 +89,6 @@ func inspect(args []string) {
 	flags.StringVar(&c.Repository, "repository", "", "Helm repository URL")
 	flags.StringVar(&c.Version, "version", "", "chart version")
 	flags.StringVar(&c.TargetVersion, "target-version", "", "target chart version")
-	flags.BoolVar(&c.ValuesDiff, "values-diff", false, "compare packaged values.yaml")
 	c.RegisterShared(flags)
 	_ = flags.Parse(args)
 
@@ -146,7 +141,7 @@ func batch(args []string) {
 }
 
 func runAndRender(manifest inspector.BatchManifest, c *Config) {
-	result := inspector.InspectBatch(context.Background(), manifest, c.ReleaseNotes, c.ReleaseNoteLimit, c.SkipReleaseNotes)
+	result := inspector.InspectBatch(context.Background(), manifest, c.ReleaseNoteLimit, !c.ReleaseNotes, c.ValuesDiff, c.GitHubClient)
 	if c.Output == "json" {
 		if err := writeJSON(result); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -184,32 +179,24 @@ func writeJSON(value any) error {
 	return encoder.Encode(value)
 }
 
-func validateConfig(args []string) {
+func validateManifest(args []string) {
 	if len(args) != 2 || args[0] != "validate" {
-		fmt.Fprintln(os.Stderr, "usage: chart-release-inspector config validate <release-notes.yaml>")
+		fmt.Fprintln(os.Stderr, "usage: chart-release-inspector manifest validate <charts.yaml>")
 		os.Exit(2)
 	}
-	ruleCount, err := validateConfigFile(args[1])
+	manifest, err := inspector.LoadBatchManifest(args[1])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(exitError)
 	}
-	fmt.Printf("valid release notes config: %d rule(s)\n", ruleCount)
-}
-
-func validateConfigFile(filename string) (int, error) {
-	config, err := inspector.LoadReleaseNotesConfig(filename)
-	if err != nil {
-		return 0, err
-	}
-	return len(config.Rules), nil
+	fmt.Printf("valid batch manifest: %d chart(s), %d rule(s)\n", len(manifest.Charts), len(manifest.Rules))
 }
 
 func printUsage(writer *os.File) {
 	fmt.Fprintln(writer, "usage:")
 	fmt.Fprintln(writer, "  chart-release-inspector inspect [flags]")
 	fmt.Fprintln(writer, "  chart-release-inspector batch --file charts.yaml")
-	fmt.Fprintln(writer, "  chart-release-inspector config validate <release-notes.yaml>")
+	fmt.Fprintln(writer, "  chart-release-inspector manifest validate <charts.yaml>")
 	fmt.Fprintln(writer, "  chart-release-inspector version")
 }
 

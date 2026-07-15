@@ -1,7 +1,20 @@
+# Example batch manifest with embedded release-note rules.
+# This configuration allows you to run version checks and fetch release notes
+# using a single file.
+
+rules:
+  - chart: external-secrets
+    repository: https://github.com/external-secrets/external-secrets
+    tag_template: v{version}
+    tag_source: app_version
+  - chart: grafana
+    repository: https://github.com/grafana/grafana
+    tag_template: v{version}
+    tag_source: app_version
+
 charts:
   - chart: external-secrets
     repository: https://charts.external-secrets.io
-    current_version: 2.7.0
-    values_diff: true
+    version: 2.6.0
   - chart: oci://ghcr.io/grafana/helm-charts/grafana
-    current_version: 10.5.14
+    version: 10.5.14

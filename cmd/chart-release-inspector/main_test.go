@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -48,35 +47,9 @@ func TestPrintUsageListsCommands(t *testing.T) {
 	if _, err := output.ReadFrom(temporaryFile); err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"inspect", "batch", "config validate", "version"} {
+	for _, command := range []string{"inspect", "batch", "manifest validate", "version"} {
 		if !bytes.Contains(output.Bytes(), []byte(command)) {
 			t.Fatalf("usage output does not contain %q: %s", command, output.String())
 		}
-	}
-}
-
-func TestValidateConfigFile(t *testing.T) {
-	filename := filepath.Join(t.TempDir(), "release-notes.yaml")
-	contents := "rules:\n  - chart: example\n    provider: github\n    repository: https://github.com/example/project\n"
-	if err := os.WriteFile(filename, []byte(contents), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ruleCount, err := validateConfigFile(filename)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ruleCount != 1 {
-		t.Fatalf("validateConfigFile() rule count = %d, want 1", ruleCount)
-	}
-}
-
-func TestValidateConfigFileRejectsInvalidProvider(t *testing.T) {
-	filename := filepath.Join(t.TempDir(), "release-notes.yaml")
-	contents := "rules:\n  - chart: example\n    provider: unsupported\n"
-	if err := os.WriteFile(filename, []byte(contents), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := validateConfigFile(filename); err == nil {
-		t.Fatal("validateConfigFile() accepted an unsupported provider")
 	}
 }
