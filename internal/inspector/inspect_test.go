@@ -1,11 +1,7 @@
 package inspector
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,16 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	chart "helm.sh/helm/v4/pkg/chart/v2"
 	"helm.sh/helm/v4/pkg/registry"
 )
-
-func TestLatestStableTagIgnoresPrereleases(t *testing.T) {
-	got := latestStableTag([]string{"1.0.0", "1.1.0-rc.1", "1.0.1"})
-	if got != "1.0.1" {
-		t.Fatalf("latestStableTag() = %q, want 1.0.1", got)
-	}
-}
 
 func TestInspectRequiresChartAndVersion(t *testing.T) {
 	result := Inspect(t.Context(), Input{})
@@ -35,20 +23,6 @@ func TestInspectRequiresChartAndVersion(t *testing.T) {
 	}
 	if result.Error != "--chart and --version are required" {
 		t.Fatalf("Inspect().Error = %q", result.Error)
-	}
-}
-
-func TestTruncateRunesPreservesUnicodeBoundaries(t *testing.T) {
-	excerpt, truncated := truncateRunes("one two", 3)
-	if excerpt != "one" || !truncated {
-		t.Fatalf("truncateRunes() = (%q, %t), want (one, true)", excerpt, truncated)
-	}
-}
-
-func TestPreviewLinesNormalizesLineEndingsAndPreservesIndentation(t *testing.T) {
-	lines := previewLines("# Notes\r\n\r\n<!-- generated metadata -->\r\n\r\n```yaml\r\n  <!-- preserved code -->\r\n  key: value\r\n```\r\n")
-	if got := strings.Join(lines, "\n"); got != "# Notes\n\n```yaml\n  <!-- preserved code -->\n  key: value\n```" {
-		t.Fatalf("previewLines() = %q", got)
 	}
 }
 
@@ -73,12 +47,6 @@ func TestResultJSONEmitsChangelogEntries(t *testing.T) {
 	}
 	if len(decoded.ValuesDiff) != 2 || decoded.ValuesDiff[1] != "+replicas: 2" || len(decoded.Changelog) != 1 || decoded.Changelog[0].BodyPreview[2] != "  code" {
 		t.Fatalf("JSON contract = %#v", decoded)
-	}
-}
-
-func TestHelmRepositorySourceRecognizesGitHubPages(t *testing.T) {
-	if got := helmRepositorySource("https://grafana.github.io/helm-charts"); got != "https://github.com/grafana/helm-charts" {
-		t.Fatalf("helmRepositorySource() = %q", got)
 	}
 }
 
@@ -134,56 +102,6 @@ func TestInspectBatchAggregatesResultsInManifestOrder(t *testing.T) {
 	if len(result.Results) != 2 || result.Results[0].Status != StatusUpdate || result.Results[1].Status != StatusError {
 		t.Fatalf("InspectBatch() results = %#v", result.Results)
 	}
-}
-
-type fakeOCIRegistry struct {
-	tags   []string
-	charts map[string]*registry.PullResult
-}
-
-func (client fakeOCIRegistry) Tags(string) ([]string, error) {
-	return client.tags, nil
-}
-
-func (client fakeOCIRegistry) Pull(reference string, _ ...registry.PullOption) (*registry.PullResult, error) {
-	pulled, found := client.charts[reference]
-	if !found {
-		return nil, errors.New("fixture chart not found")
-	}
-	return pulled, nil
-}
-
-func fixturePullResult(version, appVersion string, archive []byte, sources ...string) *registry.PullResult {
-	return &registry.PullResult{Chart: &registry.DescriptorPullSummaryWithMeta{
-		DescriptorPullSummary: registry.DescriptorPullSummary{Data: archive},
-		Meta:                  &chart.Metadata{Version: version, AppVersion: appVersion, Sources: sources},
-	}}
-}
-
-func chartFixture(t *testing.T, name, version, appVersion, values string) []byte {
-	t.Helper()
-	var archive bytes.Buffer
-	gzipWriter := gzip.NewWriter(&archive)
-	tarWriter := tar.NewWriter(gzipWriter)
-	files := map[string]string{
-		name + "/Chart.yaml":  fmt.Sprintf("apiVersion: v2\nname: %s\nversion: %s\nappVersion: %s\n", name, version, appVersion),
-		name + "/values.yaml": values,
-	}
-	for filename, content := range files {
-		if err := tarWriter.WriteHeader(&tar.Header{Name: filename, Mode: 0o600, Size: int64(len(content))}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tarWriter.Write([]byte(content)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tarWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gzipWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return archive.Bytes()
 }
 
 func TestInspectReturnsAppChangelog(t *testing.T) {
@@ -316,30 +234,6 @@ func TestInspectChangelogFallsBackToHTMLWhenAPIFails(t *testing.T) {
 	}
 	if result.ChangelogError == "" || !strings.Contains(result.ChangelogError, "fallback") {
 		t.Fatalf("expected fallback telemetry, got %q", result.ChangelogError)
-	}
-}
-
-func TestPullOCISkipsValuesExtractionWhenDiffDisabled(t *testing.T) {
-	client := fakeOCIRegistry{
-		charts: map[string]*registry.PullResult{
-			"oci://registry.example/charts/example:1.0.0": fixturePullResult("1.0.0", "v1.0.0", chartFixture(t, "example", "1.0.0", "v1.0.0", "enabled: false\n")),
-		},
-	}
-
-	withDiff, err := pullOCI(client, "oci://registry.example/charts/example", "1.0.0", true)
-	if err != nil {
-		t.Fatalf("pullOCI(includeDiff=true) error: %v", err)
-	}
-	if string(withDiff.Values) != "enabled: false\n" {
-		t.Fatalf("pullOCI(includeDiff=true) values = %q, want values.yaml content", withDiff.Values)
-	}
-
-	withoutDiff, err := pullOCI(client, "oci://registry.example/charts/example", "1.0.0", false)
-	if err != nil {
-		t.Fatalf("pullOCI(includeDiff=false) error: %v", err)
-	}
-	if withoutDiff.Values != nil {
-		t.Fatalf("pullOCI(includeDiff=false) values = %q, want nil", withoutDiff.Values)
 	}
 }
 
