@@ -42,37 +42,42 @@ func main() {
 }
 
 type Config struct {
-	Chart            string
-	Repository       string
-	Version          string
-	TargetVersion    string
-	ValuesDiff       bool
-	Filename         string
-	ReleaseNoteLimit int
-	ReleaseNotes     bool
-	FailOnUpdate     bool
-	Output           string
-	ColorMode        string
-	Color            bool
-	GitHubClient     string
+	Chart          string
+	Repository     string
+	Version        string
+	TargetVersion  string
+	ValuesDiff     bool
+	Filename       string
+	ChangelogLimit int
+	Changelog      bool
+	FailOnUpdate   bool
+	Output         string
+	ColorMode      string
+	Color          bool
 }
 
 func (c *Config) RegisterShared(flags *flag.FlagSet) {
-	flags.IntVar(&c.ReleaseNoteLimit, "release-note-limit", 2000, "maximum release-note characters; 0 keeps the complete body")
-	flags.BoolVar(&c.ReleaseNotes, "release-notes", true, "fetch and display release notes")
-	flags.BoolVar(&c.ValuesDiff, "values-diff", false, "compare packaged values.yaml")
-	flags.BoolVar(&c.FailOnUpdate, "fail-on-update", false, "exit with code 10 when updates are available")
+	flags.IntVar(&c.ChangelogLimit, "changelog-limit", 2000, "maximum changelog characters per entry; 0 keeps the complete body")
+	flags.BoolVar(&c.Changelog, "changelog", true, "fetch and display the application changelog")
+	flags.BoolVar(&c.ValuesDiff, "values-diff", false, "compare packaged values.yaml between versions (default false)")
+	flags.BoolVar(&c.FailOnUpdate, "fail-on-update", false, "exit with code 10 when an update is available")
 	flags.StringVar(&c.Output, "output", "terminal", "output format: terminal or json")
 	flags.StringVar(&c.ColorMode, "color", "auto", "color mode: auto, always, or never")
-	flags.StringVar(&c.GitHubClient, "github-client", "auto", "GitHub client for release notes: auto, api, or html")
+}
+
+// usageFor sets a flag set's Usage to a tidy header followed by the standard
+// flag listing. Call it right after creating the flag set, before Parse.
+func usageFor(flags *flag.FlagSet, description string) {
+	flags.Usage = func() {
+		out := flags.Output()
+		fmt.Fprintf(out, "Usage: chart-release-inspector %s [flags]\n\n%s\n\nFlags:\n", flags.Name(), description)
+		flags.PrintDefaults()
+	}
 }
 
 func (c *Config) ParseShared() error {
 	if !validOutput(c.Output) {
 		return fmt.Errorf("--output must be terminal or json")
-	}
-	if c.GitHubClient != "auto" && c.GitHubClient != "api" && c.GitHubClient != "html" {
-		return fmt.Errorf("invalid --github-client: must be auto, api, or html")
 	}
 	color, err := useColor(c.ColorMode)
 	if err != nil {
@@ -85,10 +90,11 @@ func (c *Config) ParseShared() error {
 func inspect(args []string) {
 	c := &Config{}
 	flags := flag.NewFlagSet("inspect", flag.ExitOnError)
+	usageFor(flags, "Inspect a single chart upgrade: compares the configured version with the target and fetches the application changelog.")
 	flags.StringVar(&c.Chart, "chart", "", "Helm chart name or oci:// reference")
-	flags.StringVar(&c.Repository, "repository", "", "Helm repository URL")
-	flags.StringVar(&c.Version, "version", "", "chart version")
-	flags.StringVar(&c.TargetVersion, "target-version", "", "target chart version")
+	flags.StringVar(&c.Repository, "repository", "", "Helm repository URL (non-OCI charts only)")
+	flags.StringVar(&c.Version, "version", "", "configured chart version to inspect from")
+	flags.StringVar(&c.TargetVersion, "target-version", "", "target chart version (defaults to latest stable)")
 	c.RegisterShared(flags)
 	_ = flags.Parse(args)
 
@@ -109,7 +115,6 @@ func inspect(args []string) {
 				Repository:    c.Repository,
 				Version:       c.Version,
 				TargetVersion: c.TargetVersion,
-				ValuesDiff:    c.ValuesDiff,
 			},
 		},
 	}
@@ -119,7 +124,8 @@ func inspect(args []string) {
 func batch(args []string) {
 	c := &Config{}
 	flags := flag.NewFlagSet("batch", flag.ExitOnError)
-	flags.StringVar(&c.Filename, "file", "", "YAML batch manifest")
+	usageFor(flags, "Inspect every chart in a YAML manifest; the global --values-diff and --changelog flags apply to all entries.")
+	flags.StringVar(&c.Filename, "file", "", "YAML batch manifest path")
 	c.RegisterShared(flags)
 	_ = flags.Parse(args)
 
@@ -141,7 +147,7 @@ func batch(args []string) {
 }
 
 func runAndRender(manifest inspector.BatchManifest, c *Config) {
-	result := inspector.InspectBatch(context.Background(), manifest, c.ReleaseNoteLimit, !c.ReleaseNotes, c.ValuesDiff, c.GitHubClient)
+	result := inspector.InspectBatch(context.Background(), manifest, c.ChangelogLimit, c.ValuesDiff, c.Changelog)
 	if c.Output == "json" {
 		if err := writeJSON(result); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -149,12 +155,12 @@ func runAndRender(manifest inspector.BatchManifest, c *Config) {
 		}
 		os.Exit(exitCodeForStatus(result.Status, c.FailOnUpdate))
 	}
-	if err := render.Human(os.Stdout, result, render.Options{Color: c.Color, Width: terminalWidth()}); err != nil {
+	if err := render.Human(os.Stdout, result, render.Options{Color: c.Color, IncludeChangelog: c.Changelog}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(exitError)
 	}
 	if len(result.Results) == 1 {
-		render.Warning(os.Stderr, result.Results[0].ReleaseNotesError, c.Color)
+		render.Warning(os.Stderr, result.Results[0].ChangelogError, c.Color)
 	}
 	os.Exit(exitCodeForStatus(result.Status, c.FailOnUpdate))
 }
@@ -189,15 +195,15 @@ func validateManifest(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(exitError)
 	}
-	fmt.Printf("valid batch manifest: %d chart(s), %d rule(s)\n", len(manifest.Charts), len(manifest.Rules))
+	fmt.Printf("valid batch manifest: %d chart(s)\n", len(manifest.Charts))
 }
 
 func printUsage(writer *os.File) {
 	fmt.Fprintln(writer, "usage:")
-	fmt.Fprintln(writer, "  chart-release-inspector inspect [flags]")
-	fmt.Fprintln(writer, "  chart-release-inspector batch --file charts.yaml")
-	fmt.Fprintln(writer, "  chart-release-inspector manifest validate <charts.yaml>")
-	fmt.Fprintln(writer, "  chart-release-inspector version")
+	fmt.Fprintln(writer, "  chart-release-inspector inspect [flags]             inspect a single chart upgrade")
+	fmt.Fprintln(writer, "  chart-release-inspector batch --file FILE [flags]    inspect every chart in a manifest")
+	fmt.Fprintln(writer, "  chart-release-inspector manifest validate FILE       check a manifest file for structure errors")
+	fmt.Fprintln(writer, "  chart-release-inspector version                      print the version")
 }
 
 func validOutput(output string) bool {
@@ -218,14 +224,6 @@ func useColor(mode string) (bool, error) {
 	default:
 		return false, fmt.Errorf("--color must be auto, always, or never")
 	}
-}
-
-func terminalWidth() int {
-	width, _, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil || width < 40 {
-		return 80
-	}
-	return width
 }
 
 func exitCodeForStatus(status string, failOnUpdate bool) int {

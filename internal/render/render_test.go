@@ -8,21 +8,21 @@ import (
 	"github.com/imtpot/chart-release-inspector/internal/inspector"
 )
 
-func TestHumanPlainOutputIncludesReleaseNotes(t *testing.T) {
+func TestHumanPlainOutputIncludesChangelog(t *testing.T) {
 	var output bytes.Buffer
 	err := Human(&output, inspector.BatchResult{
 		Results: []inspector.Result{{
-			SourceType:          "helm_repository",
+			SourceType:         "helm_repository",
 			ChartVersion:       "1.0.0",
-			TargetChartVersion:  "1.1.0",
+			TargetChartVersion: "1.1.0",
 			AppVersion:         "v1.0.0",
-			TargetAppVersion:    "v1.1.0",
-			Releases: []inspector.ReleaseNote{{
+			TargetAppVersion:   "v1.1.0",
+			Changelog: []inspector.ChangelogEntry{{
 				Version: "1.1.0", URL: "https://example.test/releases/1.1.0",
 				BodyPreview: []string{"# Breaking change"}, BodyCharacters: 42, Truncated: true,
 			}},
 		}},
-	}, Options{Width: 80})
+	}, Options{IncludeChangelog: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestHumanPlainOutputIncludesReleaseNotes(t *testing.T) {
 		"Status",
 		"1.0.0 -> 1.1.0",
 		"v1.0.0 -> v1.1.0",
-		"Release notes",
+		"Changelog",
 		"1.1.0: https://example.test/releases/1.1.0",
 		"Breaking change",
 		"[Preview truncated; 42 characters total]",
@@ -44,20 +44,20 @@ func TestHumanPlainOutputIncludesReleaseNotes(t *testing.T) {
 	}
 }
 
-func TestHumanOutputIncludesValuesDiffWithoutReleaseNotes(t *testing.T) {
+func TestHumanOutputIncludesValuesDiffWithoutChangelog(t *testing.T) {
 	changed := true
 	var output bytes.Buffer
 	err := Human(&output, inspector.BatchResult{
 		Results: []inspector.Result{{
-			SourceType:          "helm_repository",
+			SourceType:         "helm_repository",
 			ChartVersion:       "1.0.0",
-			TargetChartVersion:  "1.1.0",
+			TargetChartVersion: "1.1.0",
 			AppVersion:         "v1.0.0",
-			TargetAppVersion:    "v1.1.0",
-			ValuesDiffChanged:   &changed,
-			ValuesDiff:          []string{"--- values.yaml (1.0.0)", "+++ values.yaml (1.1.0)", "@@ -1 +1 @@", "-replicas: 1", "+replicas: 2"},
+			TargetAppVersion:   "v1.1.0",
+			ValuesDiffChanged:  &changed,
+			ValuesDiff:         []string{"--- values.yaml (1.0.0)", "+++ values.yaml (1.1.0)", "@@ -1 +1 @@", "-replicas: 1", "+replicas: 2"},
 		}},
-	}, Options{Width: 80})
+	}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,17 +94,17 @@ func TestHumanColorOutputRendersMarkdown(t *testing.T) {
 	var output bytes.Buffer
 	err := Human(&output, inspector.BatchResult{
 		Results: []inspector.Result{{
-			SourceType:          "helm_repository",
+			SourceType:         "helm_repository",
 			ChartVersion:       "1.0.0",
-			TargetChartVersion:  "1.1.0",
+			TargetChartVersion: "1.1.0",
 			AppVersion:         "v1.0.0",
-			TargetAppVersion:    "v1.1.0",
-			Releases: []inspector.ReleaseNote{{
+			TargetAppVersion:   "v1.1.0",
+			Changelog: []inspector.ChangelogEntry{{
 				Version: "1.1.0", URL: "https://example.test/releases/1.1.0",
 				BodyPreview: []string{"# Breaking change", "", "Use `layerSelector`."},
 			}},
 		}},
-	}, Options{Color: true, Width: 80})
+	}, Options{Color: true, IncludeChangelog: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,5 +113,74 @@ func TestHumanColorOutputRendersMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "\x1b[") {
 		t.Fatalf("Human() did not render ANSI colors:\n%s", output.String())
+	}
+}
+
+func TestHumanOutputShowsNoChangelogMessage(t *testing.T) {
+	var output bytes.Buffer
+	err := Human(&output, inspector.BatchResult{
+		Results: []inspector.Result{{
+			SourceType:         "helm_repository",
+			ChartVersion:       "1.0.0",
+			TargetChartVersion: "1.1.0",
+			AppVersion:         "v1.0.0",
+			TargetAppVersion:   "v1.0.0", // app version unchanged
+			Status:             inspector.StatusUpdate,
+			Changelog:          []inspector.ChangelogEntry{},
+		}},
+	}, Options{IncludeChangelog: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "No changelog found.") {
+		t.Fatalf("Human() did not print 'No changelog found.':\n%s", output.String())
+	}
+}
+
+func TestHumanPlainOutputHasNoAnsiWhenColorDisabled(t *testing.T) {
+	var output bytes.Buffer
+	err := Human(&output, inspector.BatchResult{
+		Results: []inspector.Result{{
+			SourceType:         "helm_repository",
+			ChartVersion:       "1.0.0",
+			TargetChartVersion: "1.1.0",
+			AppVersion:         "v1.0.0",
+			TargetAppVersion:   "v1.1.0",
+			Status:             inspector.StatusUpdate,
+			Changelog: []inspector.ChangelogEntry{{
+				Version: "1.1.0", URL: "https://example.test/releases/1.1.0",
+				BodyPreview: []string{"# Breaking change"},
+			}},
+		}},
+	}, Options{IncludeChangelog: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "\x1b[") {
+		t.Fatalf("Human() emitted ANSI escapes with color disabled:\n%s", output.String())
+	}
+	if !strings.Contains(output.String(), "Chart Version") {
+		t.Fatalf("Human() missing table header:\n%s", output.String())
+	}
+}
+
+func TestHumanOutputOmitsChangelogSectionWhenDisabled(t *testing.T) {
+	var output bytes.Buffer
+	err := Human(&output, inspector.BatchResult{
+		Results: []inspector.Result{{
+			SourceType:         "helm_repository",
+			ChartVersion:       "1.0.0",
+			TargetChartVersion: "1.1.0",
+			AppVersion:         "v1.0.0",
+			TargetAppVersion:   "v1.1.0",
+			Status:             inspector.StatusUpdate,
+			Changelog:          []inspector.ChangelogEntry{},
+		}},
+	}, Options{IncludeChangelog: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "Changelog") || strings.Contains(output.String(), "No changelog found") {
+		t.Fatalf("Human() printed a changelog section when disabled:\n%s", output.String())
 	}
 }

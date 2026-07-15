@@ -1,21 +1,25 @@
-# Example batch manifest with embedded release-note rules.
-# This configuration allows you to run version checks and fetch release notes
-# using a single file.
-
-rules:
-  - chart: external-secrets
-    repository: https://github.com/external-secrets/external-secrets
-    tag_template: v{version}
-    tag_source: app_version
-  - chart: grafana
-    repository: https://github.com/grafana/grafana
-    tag_template: v{version}
-    tag_source: app_version
+# Example batch manifest.
+# Each chart entry is inspected like a standalone `inspect` call; the global
+# --values-diff and --changelog flags apply uniformly to every chart.
+# `app_repository` overrides the changelog source when the chart's own metadata
+# points elsewhere (e.g. the Helm chart repo instead of the application repo).
 
 charts:
+  # 1. Standard Helm chart repository without overrides (repository has valid metadata)
   - chart: external-secrets
     repository: https://charts.external-secrets.io
     version: 2.6.0
     target_version: 2.7.0
-  - chart: oci://ghcr.io/grafana/helm-charts/grafana
-    version: 10.5.14
+
+  # 2. OCI registry without overrides (quay.io, metadata points directly to git)
+  - chart: oci://public.ecr.aws/zenml/zenml
+    version: 0.95.1
+    target_version: 0.96.1
+
+  # 3. Mimir Distributed - requires app_repository override (mimir lives in monorepo).
+  # Test automatic tag matching (verifies mimir-3.1.2 tag formats are parsed).
+  - chart: mimir-distributed
+    repository: https://grafana.github.io/helm-charts
+    version: 6.0.6
+    target_version: 6.1.0
+    app_repository: https://github.com/grafana/mimir

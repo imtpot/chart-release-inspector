@@ -12,8 +12,8 @@ import (
 
 // Options controls the terminal rendering policy selected by the CLI adapter.
 type Options struct {
-	Color bool
-	Width int
+	Color            bool
+	IncludeChangelog bool
 }
 
 // Human prints a readable inspection report without changing the JSON contract.
@@ -23,6 +23,14 @@ func Human(writer io.Writer, result inspector.BatchResult, options Options) erro
 		fmt.Fprintf(writer, "Error: %s\n", result.Error)
 		return nil
 	}
+	// pterm's table renderer reads its global color setting, not options.Color,
+	// so mirror the requested mode onto pterm before rendering.
+	if options.Color {
+		pterm.EnableColor()
+	} else {
+		pterm.DisableColor()
+	}
+
 	if err := renderTable(writer, result, options); err != nil {
 		return err
 	}
@@ -35,9 +43,10 @@ func Human(writer io.Writer, result inspector.BatchResult, options Options) erro
 		}
 		if res.Status == inspector.StatusUpdate || isSingle {
 			hasDiff := res.ValuesDiffChanged != nil
-			hasNotes := len(res.Releases) > 0
+			hasChangelog := len(res.Changelog) > 0
+			showChangelog := options.IncludeChangelog
 
-			if hasDiff || hasNotes {
+			if hasDiff || (showChangelog && hasChangelog) || (showChangelog && isSingle) {
 				if !isSingle {
 					header := fmt.Sprintf("--- Details for %s ---", res.Chart)
 					if options.Color {
@@ -50,22 +59,36 @@ func Human(writer io.Writer, result inspector.BatchResult, options Options) erro
 					renderValuesDiff(writer, res, options)
 					detailsPrinted = true
 				}
-				if hasNotes {
+				if showChangelog {
 					if detailsPrinted {
 						fmt.Fprintln(writer)
 					}
-					section := "Release notes"
+					section := "Changelog"
 					if options.Color {
 						section = pterm.NewStyle(pterm.Bold, pterm.FgLightCyan).Sprint(section)
 					}
 					fmt.Fprintln(writer, section)
-					for i, release := range res.Releases {
-						if i > 0 {
-							fmt.Fprintln(writer)
+					if hasChangelog {
+						for i, entry := range res.Changelog {
+							if i > 0 {
+								fmt.Fprintln(writer)
+							}
+							if err := renderEntry(writer, entry, options); err != nil {
+								return err
+							}
 						}
-						if err := renderRelease(writer, release, options); err != nil {
-							return err
+					} else if res.ChangelogError == "" {
+						message := "No changelog found."
+						if options.Color {
+							message = pterm.FgGray.Sprint(message)
 						}
+						fmt.Fprintln(writer, message)
+					} else {
+						message := "No changelog found: " + res.ChangelogError
+						if options.Color {
+							message = pterm.FgYellow.Sprint(message)
+						}
+						fmt.Fprintln(writer, message)
 					}
 				}
 				if !isSingle {
@@ -77,12 +100,12 @@ func Human(writer io.Writer, result inspector.BatchResult, options Options) erro
 	return nil
 }
 
-// Warning writes a release-note diagnostic to the error stream.
+// Warning writes a changelog diagnostic to the error stream.
 func Warning(writer io.Writer, message string, color bool) {
 	if message == "" {
 		return
 	}
-	text := "Release notes: " + message
+	text := "Changelog: " + message
 	if color {
 		text = pterm.FgYellow.Sprint(text)
 	}
@@ -170,17 +193,17 @@ func renderValuesDiff(writer io.Writer, result inspector.Result, options Options
 	}
 }
 
-func renderRelease(writer io.Writer, release inspector.ReleaseNote, options Options) error {
-	label := fmt.Sprintf("%s: %s", release.Version, release.URL)
+func renderEntry(writer io.Writer, entry inspector.ChangelogEntry, options Options) error {
+	label := fmt.Sprintf("%s: %s", entry.Version, entry.URL)
 	if options.Color {
 		label = pterm.NewStyle(pterm.Bold, pterm.FgGreen).Sprint(label)
 	}
 	fmt.Fprintln(writer, label)
-	if len(release.BodyPreview) > 0 {
-		fmt.Fprintln(writer, renderMarkdown(strings.Join(release.BodyPreview, "\n"), options.Color))
+	if len(entry.BodyPreview) > 0 {
+		fmt.Fprintln(writer, renderMarkdown(strings.Join(entry.BodyPreview, "\n"), options.Color))
 	}
-	if release.Truncated {
-		message := fmt.Sprintf("[Preview truncated; %d characters total]", release.BodyCharacters)
+	if entry.Truncated {
+		message := fmt.Sprintf("[Preview truncated; %d characters total]", entry.BodyCharacters)
 		if options.Color {
 			message = pterm.FgGray.Sprint(message)
 		}

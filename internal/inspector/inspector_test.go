@@ -18,14 +18,8 @@ import (
 	"helm.sh/helm/v4/pkg/registry"
 )
 
-func TestApplicationVersionFallsBackToChartVersion(t *testing.T) {
-	if got := applicationVersion(chartVersion{Version: "1.2.3"}); got != "1.2.3" {
-		t.Fatalf("applicationVersion() = %q, want 1.2.3", got)
-	}
-}
-
 func TestLatestStableTagIgnoresPrereleases(t *testing.T) {
-	got := latestStableTag([]string{"1.0.0", "1.1.0-rc.1", "1.0.1"}, "1.0.0")
+	got := latestStableTag([]string{"1.0.0", "1.1.0-rc.1", "1.0.1"})
 	if got != "1.0.1" {
 		t.Fatalf("latestStableTag() = %q, want 1.0.1", got)
 	}
@@ -58,10 +52,10 @@ func TestPreviewLinesNormalizesLineEndingsAndPreservesIndentation(t *testing.T) 
 	}
 }
 
-func TestResultJSONEmitsValuesDiffLines(t *testing.T) {
+func TestResultJSONEmitsChangelogEntries(t *testing.T) {
 	encoded, err := json.Marshal(Result{
-		ValuesDiff:    []string{"--- values.yaml (1.0.0)", "+replicas: 2"},
-		Releases: []ReleaseNote{{
+		ValuesDiff: []string{"--- values.yaml (1.0.0)", "+replicas: 2"},
+		Changelog: []ChangelogEntry{{
 			BodyPreview: []string{"# Notes", "", "  code"},
 		}},
 	})
@@ -69,15 +63,15 @@ func TestResultJSONEmitsValuesDiffLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	var decoded struct {
-		ValuesDiff    []string `json:"values_diff"`
-		Releases      []struct {
+		ValuesDiff []string `json:"values_diff"`
+		Changelog  []struct {
 			BodyPreview []string `json:"body_preview"`
-		} `json:"releases"`
+		} `json:"changelog"`
 	}
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if len(decoded.ValuesDiff) != 2 || decoded.ValuesDiff[1] != "+replicas: 2" || len(decoded.Releases) != 1 || decoded.Releases[0].BodyPreview[2] != "  code" {
+	if len(decoded.ValuesDiff) != 2 || decoded.ValuesDiff[1] != "+replicas: 2" || len(decoded.Changelog) != 1 || decoded.Changelog[0].BodyPreview[2] != "  code" {
 		t.Fatalf("JSON contract = %#v", decoded)
 	}
 }
@@ -88,16 +82,9 @@ func TestHelmRepositorySourceRecognizesGitHubPages(t *testing.T) {
 	}
 }
 
-func TestLoadBatchManifestRejectsInvalidRules(t *testing.T) {
+func TestLoadBatchManifestRejectsInvalidAppRepository(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "charts.yaml")
-	contents := `
-rules:
-  - chart: example
-    repository: example/project
-charts:
-  - chart: example
-    version: 1.0.0
-`
+	contents := "charts:\n  - chart: example\n    version: 1.0.0\n    app_repository: example/project\n"
 	if err := os.WriteFile(filename, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +126,7 @@ func TestInspectBatchAggregatesResultsInManifestOrder(t *testing.T) {
 	result := InspectBatch(t.Context(), BatchManifest{Charts: []BatchChart{
 		{Chart: "example", Repository: server.URL, Version: "1.0.0"},
 		{Chart: "", Version: "1.0.0"},
-	}}, 2000, false, false, "auto")
+	}}, 2000, false, true)
 
 	if result.SchemaVersion != BatchSchemaVersion || result.Status != StatusError {
 		t.Fatalf("InspectBatch() contract = %#v", result)
@@ -149,98 +136,210 @@ func TestInspectBatchAggregatesResultsInManifestOrder(t *testing.T) {
 	}
 }
 
-func TestGitHubReleaseNotesTraversesMatchingIntermediateVersions(t *testing.T) {
+type fakeOCIRegistry struct {
+	tags   []string
+	charts map[string]*registry.PullResult
+}
+
+func (client fakeOCIRegistry) Tags(string) ([]string, error) {
+	return client.tags, nil
+}
+
+func (client fakeOCIRegistry) Pull(reference string, _ ...registry.PullOption) (*registry.PullResult, error) {
+	pulled, found := client.charts[reference]
+	if !found {
+		return nil, errors.New("fixture chart not found")
+	}
+	return pulled, nil
+}
+
+func fixturePullResult(version, appVersion string, archive []byte, sources ...string) *registry.PullResult {
+	return &registry.PullResult{Chart: &registry.DescriptorPullSummaryWithMeta{
+		DescriptorPullSummary: registry.DescriptorPullSummary{Data: archive},
+		Meta:                  &chart.Metadata{Version: version, AppVersion: appVersion, Sources: sources},
+	}}
+}
+
+func chartFixture(t *testing.T, name, version, appVersion, values string) []byte {
+	t.Helper()
+	var archive bytes.Buffer
+	gzipWriter := gzip.NewWriter(&archive)
+	tarWriter := tar.NewWriter(gzipWriter)
+	files := map[string]string{
+		name + "/Chart.yaml":  fmt.Sprintf("apiVersion: v2\nname: %s\nversion: %s\nappVersion: %s\n", name, version, appVersion),
+		name + "/values.yaml": values,
+	}
+	for filename, content := range files {
+		if err := tarWriter.WriteHeader(&tar.Header{Name: filename, Mode: 0o600, Size: int64(len(content))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tarWriter.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return archive.Bytes()
+}
+
+func TestInspectReturnsAppChangelog(t *testing.T) {
+	originalFactory := newOCIRegistryClient
 	originalAPIBase := githubAPIBase
-	t.Cleanup(func() { githubAPIBase = originalAPIBase })
+	t.Cleanup(func() {
+		newOCIRegistryClient = originalFactory
+		githubAPIBase = originalAPIBase
+	})
+
+	newOCIRegistryClient = func() (ociRegistryClient, error) {
+		return fakeOCIRegistry{
+			tags: []string{"10.5.10", "10.5.15"},
+			charts: map[string]*registry.PullResult{
+				"oci://registry.example/charts/mycharts:10.5.10": fixturePullResult("10.5.10", "v2.0.0", chartFixture(t, "mycharts", "10.5.10", "v2.0.0", ""), "https://github.com/org/myapp"),
+				"oci://registry.example/charts/mycharts:10.5.15": fixturePullResult("10.5.15", "v2.1.0", chartFixture(t, "mycharts", "10.5.15", "v2.1.0", ""), "https://github.com/org/myapp"),
+			},
+		}, nil
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Query().Get("page") == "1" {
-			writer.Header().Set("Link", "<https://example.test/releases?page=2>; rel=\"next\"")
-			fmt.Fprint(writer, `[{"tag_name":"app-1.1.0","html_url":"https://example.test/1.1.0","body":"one"},{"tag_name":"app-1.2.0","html_url":"https://example.test/1.2.0","body":"two"}]`)
+		if request.URL.Path == "/repos/org/myapp/releases" {
+			fmt.Fprint(writer, `[{"tag_name":"v2.1.0","html_url":"https://github.com/org/myapp/releases/tag/v2.1.0","body":"app release notes"}]`)
 			return
 		}
-		fmt.Fprint(writer, `[{"tag_name":"app-1.3.0","html_url":"https://example.test/1.3.0","body":"three"}]`)
+		http.NotFound(writer, request)
 	}))
 	defer server.Close()
 	githubAPIBase = server.URL
 
-	notes, notesErr := githubReleaseNotes(
-		t.Context(),
-		ReleaseNoteRule{Provider: "github", Repository: "https://github.com/example/project", TagTemplate: "app-{version}"},
-		"", "1.0.0", "1.3.0", 2, false, "auto",
-	)
-	if notesErr != "" {
-		t.Fatalf("githubReleaseNotes() error = %q", notesErr)
+	result := Inspect(t.Context(), Input{
+		Chart:            "oci://registry.example/charts/mycharts",
+		Version:          "10.5.10",
+		IncludeChangelog: true,
+		AppRepository:    "https://github.com/org/myapp",
+	})
+
+	if result.Status != StatusUpdate {
+		t.Fatalf("Inspect() status = %q, want update_available", result.Status)
 	}
-	if len(notes) != 3 || notes[0].Version != "1.1.0" || notes[2].Version != "1.3.0" {
-		t.Fatalf("githubReleaseNotes() = %#v", notes)
+	if len(result.Changelog) != 1 || result.Changelog[0].BodyPreview[0] != "app release notes" {
+		t.Fatalf("expected app changelog, got %#v", result.Changelog)
 	}
-	if len(notes[2].BodyPreview) != 1 || notes[2].BodyPreview[0] != "th" || !notes[2].Truncated {
-		t.Fatalf("bounded release note = %#v", notes[2])
+	if result.ChangelogError != "" {
+		t.Fatalf("unexpected changelog error: %q", result.ChangelogError)
 	}
 }
 
-func TestGitHubReleaseNotesFallsBackToPublicReleasePage(t *testing.T) {
-	originalAPIBase, originalWebBase := githubAPIBase, githubWebBase
+func TestInspectSkipsChangelogWhenDisabled(t *testing.T) {
+	originalFactory := newOCIRegistryClient
+	originalAPIBase := githubAPIBase
 	t.Cleanup(func() {
+		newOCIRegistryClient = originalFactory
+		githubAPIBase = originalAPIBase
+	})
+
+	newOCIRegistryClient = func() (ociRegistryClient, error) {
+		return fakeOCIRegistry{
+			tags: []string{"10.5.10", "10.5.15"},
+			charts: map[string]*registry.PullResult{
+				"oci://registry.example/charts/mycharts:10.5.10": fixturePullResult("10.5.10", "v2.0.0", chartFixture(t, "mycharts", "10.5.10", "v2.0.0", ""), "https://github.com/org/myapp"),
+				"oci://registry.example/charts/mycharts:10.5.15": fixturePullResult("10.5.15", "v2.1.0", chartFixture(t, "mycharts", "10.5.15", "v2.1.0", ""), "https://github.com/org/myapp"),
+			},
+		}, nil
+	}
+
+	// Any hit to the GitHub API would fail the test; the disabled flag must skip it.
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		http.Error(writer, "must not be called", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	githubAPIBase = server.URL
+
+	result := Inspect(t.Context(), Input{
+		Chart:            "oci://registry.example/charts/mycharts",
+		Version:          "10.5.10",
+		IncludeChangelog: false,
+		AppRepository:    "https://github.com/org/myapp",
+	})
+
+	if result.Status != StatusUpdate {
+		t.Fatalf("Inspect() status = %q, want update_available", result.Status)
+	}
+	if len(result.Changelog) != 0 || result.ChangelogError != "" {
+		t.Fatalf("changelog should be skipped, got entries=%d error=%q", len(result.Changelog), result.ChangelogError)
+	}
+}
+
+func TestInspectChangelogFallsBackToHTMLWhenAPIFails(t *testing.T) {
+	originalFactory := newOCIRegistryClient
+	originalAPIBase := githubAPIBase
+	originalWebBase := githubWebBase
+	t.Cleanup(func() {
+		newOCIRegistryClient = originalFactory
 		githubAPIBase = originalAPIBase
 		githubWebBase = originalWebBase
 	})
+
+	newOCIRegistryClient = func() (ociRegistryClient, error) {
+		return fakeOCIRegistry{
+			tags: []string{"10.5.10", "10.5.15"},
+			charts: map[string]*registry.PullResult{
+				"oci://registry.example/charts/mycharts:10.5.10": fixturePullResult("10.5.10", "v2.0.0", chartFixture(t, "mycharts", "10.5.10", "v2.0.0", ""), "https://github.com/org/myapp"),
+				"oci://registry.example/charts/mycharts:10.5.15": fixturePullResult("10.5.15", "v2.1.0", chartFixture(t, "mycharts", "10.5.15", "v2.1.0", ""), "https://github.com/org/myapp"),
+			},
+		}, nil
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/repos/example/project/releases" {
-			http.Error(writer, "rate limited", http.StatusForbidden)
+		// API path 404s; the HTML release page serves the rendered body.
+		if strings.Contains(request.URL.Path, "/releases/tag/v2.1.0") {
+			fmt.Fprint(writer, `<html><body><div class="markdown-body"><p>app release notes</p></div></body></html>`)
 			return
 		}
-		fmt.Fprint(writer, `<div class="markdown-body"><p>Release fallback notes</p></div>`)
-	}))
-	defer server.Close()
-	githubAPIBase, githubWebBase = server.URL, server.URL
-
-	notes, notesErr := githubReleaseNotes(
-		t.Context(),
-		ReleaseNoteRule{Provider: "github", Repository: "https://github.com/example/project", TagTemplate: "v{version}"},
-		"", "1.0.0", "1.1.0", 2000, false, "auto",
-	)
-	if len(notes) != 1 || len(notes[0].BodyPreview) != 1 || notes[0].BodyPreview[0] != "Release fallback notes" {
-		t.Fatalf("fallback notes = %#v", notes)
-	}
-	if !strings.Contains(notesErr, "fallback") {
-		t.Fatalf("fallback error = %q", notesErr)
-	}
-}
-
-func TestGitHubReleaseNotesUsesEnvironmentToken(t *testing.T) {
-	originalAPIBase := githubAPIBase
-	t.Cleanup(func() { githubAPIBase = originalAPIBase })
-	t.Setenv("GITHUB_TOKEN", "test-token")
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if got := request.Header.Get("Authorization"); got != "Bearer test-token" {
-			t.Fatalf("Authorization = %q", got)
-		}
-		fmt.Fprint(writer, `[{"tag_name":"v1.1.0","html_url":"https://example.test/1.1.0","body":"notes"}]`)
+		http.NotFound(writer, request)
 	}))
 	defer server.Close()
 	githubAPIBase = server.URL
+	githubWebBase = server.URL
 
-	notes, notesErr := githubReleaseNotes(
-		t.Context(), ReleaseNoteRule{Provider: "github", Repository: "https://github.com/example/project"},
-		"", "1.0.0", "1.1.0", 2000, false, "auto",
-	)
-	if notesErr != "" || len(notes) != 1 {
-		t.Fatalf("githubReleaseNotes() = %#v, %q", notes, notesErr)
+	result := Inspect(t.Context(), Input{
+		Chart:            "oci://registry.example/charts/mycharts",
+		Version:          "10.5.10",
+		IncludeChangelog: true,
+		AppRepository:    "https://github.com/org/myapp",
+	})
+
+	if len(result.Changelog) != 1 || result.Changelog[0].BodyPreview[0] != "app release notes" {
+		t.Fatalf("expected HTML-fallback changelog, got %#v", result.Changelog)
+	}
+	if result.ChangelogError == "" || !strings.Contains(result.ChangelogError, "fallback") {
+		t.Fatalf("expected fallback telemetry, got %q", result.ChangelogError)
 	}
 }
 
-func TestGitHubReleaseNotesSkipsWhenRequested(t *testing.T) {
-	notes, notesErr := githubReleaseNotes(
-		t.Context(),
-		ReleaseNoteRule{Provider: "github", Repository: "https://github.com/example/project", TagTemplate: "v{version}"},
-		"", "1.0.0", "1.1.0", 2000, true, "auto",
-	)
-	if notesErr != "" {
-		t.Fatalf("githubReleaseNotes() error = %q", notesErr)
+func TestPullOCISkipsValuesExtractionWhenDiffDisabled(t *testing.T) {
+	client := fakeOCIRegistry{
+		charts: map[string]*registry.PullResult{
+			"oci://registry.example/charts/example:1.0.0": fixturePullResult("1.0.0", "v1.0.0", chartFixture(t, "example", "1.0.0", "v1.0.0", "enabled: false\n")),
+		},
 	}
-	if len(notes) != 0 {
-		t.Fatalf("expected 0 notes, got %#v", notes)
+
+	withDiff, err := pullOCI(client, "oci://registry.example/charts/example", "1.0.0", true)
+	if err != nil {
+		t.Fatalf("pullOCI(includeDiff=true) error: %v", err)
+	}
+	if string(withDiff.Values) != "enabled: false\n" {
+		t.Fatalf("pullOCI(includeDiff=true) values = %q, want values.yaml content", withDiff.Values)
+	}
+
+	withoutDiff, err := pullOCI(client, "oci://registry.example/charts/example", "1.0.0", false)
+	if err != nil {
+		t.Fatalf("pullOCI(includeDiff=false) error: %v", err)
+	}
+	if withoutDiff.Values != nil {
+		t.Fatalf("pullOCI(includeDiff=false) values = %q, want nil", withoutDiff.Values)
 	}
 }
 
@@ -304,52 +403,61 @@ func TestInspectOCIFixtureUsesHelmRegistryContract(t *testing.T) {
 	}
 }
 
-type fakeOCIRegistry struct {
-	tags   []string
-	charts map[string]*registry.PullResult
-}
+func TestInspectReturnsMultipleAppReleasesWithVariousTagFormats(t *testing.T) {
+	originalFactory := newOCIRegistryClient
+	originalAPIBase := githubAPIBase
+	t.Cleanup(func() {
+		newOCIRegistryClient = originalFactory
+		githubAPIBase = originalAPIBase
+	})
 
-func (client fakeOCIRegistry) Tags(string) ([]string, error) {
-	return client.tags, nil
-}
-
-func (client fakeOCIRegistry) Pull(reference string, _ ...registry.PullOption) (*registry.PullResult, error) {
-	pulled, found := client.charts[reference]
-	if !found {
-		return nil, errors.New("fixture chart not found")
+	newOCIRegistryClient = func() (ociRegistryClient, error) {
+		return fakeOCIRegistry{
+			tags: []string{"10.5.10", "10.5.15"},
+			charts: map[string]*registry.PullResult{
+				"oci://registry.example/charts/mycharts:10.5.10": fixturePullResult("10.5.10", "v2.0.0", chartFixture(t, "mycharts", "10.5.10", "v2.0.0", ""), "https://github.com/org/myapp"),
+				"oci://registry.example/charts/mycharts:10.5.15": fixturePullResult("10.5.15", "v2.0.3", chartFixture(t, "mycharts", "10.5.15", "v2.0.3", ""), "https://github.com/org/myapp"),
+			},
+		}, nil
 	}
-	return pulled, nil
-}
 
-func fixturePullResult(version, appVersion string, archive []byte) *registry.PullResult {
-	return &registry.PullResult{Chart: &registry.DescriptorPullSummaryWithMeta{
-		DescriptorPullSummary: registry.DescriptorPullSummary{Data: archive},
-		Meta:                  &chart.Metadata{Version: version, AppVersion: appVersion},
-	}}
-}
-
-func chartFixture(t *testing.T, name, version, appVersion, values string) []byte {
-	t.Helper()
-	var archive bytes.Buffer
-	gzipWriter := gzip.NewWriter(&archive)
-	tarWriter := tar.NewWriter(gzipWriter)
-	files := map[string]string{
-		name + "/Chart.yaml":  fmt.Sprintf("apiVersion: v2\nname: %s\nversion: %s\nappVersion: %s\n", name, version, appVersion),
-		name + "/values.yaml": values,
-	}
-	for filename, content := range files {
-		if err := tarWriter.WriteHeader(&tar.Header{Name: filename, Mode: 0o600, Size: int64(len(content))}); err != nil {
-			t.Fatal(err)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/repos/org/myapp/releases" {
+			// Return a mix of tag formats, prereleases, and versions inside/outside the target range (2.0.0 < v <= 2.0.3)
+			fmt.Fprint(writer, `[
+				{"tag_name":"2.1.0","html_url":"https://github.com/org/myapp/releases/tag/2.1.0","body":"too new"},
+				{"tag_name":"v2.0.3","html_url":"https://github.com/org/myapp/releases/tag/v2.0.3","body":"v2.0.3 notes"},
+				{"tag_name":"2.0.2","html_url":"https://github.com/org/myapp/releases/tag/2.0.2","body":"2.0.2 notes"},
+				{"tag_name":"app-v2.0.1","html_url":"https://github.com/org/myapp/releases/tag/app-v2.0.1","body":"app-v2.0.1 notes"},
+				{"tag_name":"2.0.1-rc.1","html_url":"https://github.com/org/myapp/releases/tag/2.0.1-rc.1","body":"prerelease skipped"},
+				{"tag_name":"v2.0.0","html_url":"https://github.com/org/myapp/releases/tag/v2.0.0","body":"current version skipped"}
+			]`)
+			return
 		}
-		if _, err := tarWriter.Write([]byte(content)); err != nil {
-			t.Fatal(err)
-		}
+		http.NotFound(writer, request)
+	}))
+	defer server.Close()
+	githubAPIBase = server.URL
+
+	result := Inspect(t.Context(), Input{
+		Chart:            "oci://registry.example/charts/mycharts",
+		Version:          "10.5.10",
+		IncludeChangelog: true,
+		AppRepository:    "https://github.com/org/myapp",
+	})
+
+	if len(result.Changelog) != 3 {
+		t.Fatalf("expected 3 changelog entries, got %d: %#v", len(result.Changelog), result.Changelog)
 	}
-	if err := tarWriter.Close(); err != nil {
-		t.Fatal(err)
+
+	// Should be sorted in ascending order of version: 2.0.1 -> 2.0.2 -> 2.0.3
+	if result.Changelog[0].Version != "2.0.1" || result.Changelog[0].BodyPreview[0] != "app-v2.0.1 notes" {
+		t.Fatalf("expected 2.0.1 at index 0, got version %q notes %q", result.Changelog[0].Version, result.Changelog[0].BodyPreview[0])
 	}
-	if err := gzipWriter.Close(); err != nil {
-		t.Fatal(err)
+	if result.Changelog[1].Version != "2.0.2" || result.Changelog[1].BodyPreview[0] != "2.0.2 notes" {
+		t.Fatalf("expected 2.0.2 at index 1, got version %q notes %q", result.Changelog[1].Version, result.Changelog[1].BodyPreview[0])
 	}
-	return archive.Bytes()
+	if result.Changelog[2].Version != "2.0.3" || result.Changelog[2].BodyPreview[0] != "v2.0.3 notes" {
+		t.Fatalf("expected 2.0.3 at index 2, got version %q notes %q", result.Changelog[2].Version, result.Changelog[2].BodyPreview[0])
+	}
 }
