@@ -46,7 +46,7 @@ go install github.com/imtpot/chart-release-inspector/cmd/chart-release-inspector
 **Via [mise](https://mise.jdx.dev/):**
 ```toml
 [tools]
-"github:imtpot/chart-release-inspector" = "0.6.0"
+"github:imtpot/chart-release-inspector" = "0.7.0"
 ```
 
 ---
