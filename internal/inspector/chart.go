@@ -29,7 +29,11 @@ type ociRegistryClient interface {
 }
 
 var newOCIRegistryClient = func() (ociRegistryClient, error) {
-	return registry.NewClient()
+	client, err := registry.NewClient()
+	if err != nil {
+		return nil, err
+	}
+	return ociClient{Client: client}, nil
 }
 
 func inspectRepository(ctx context.Context, input Input) (chartVersion, chartVersion, error) {
