@@ -117,6 +117,37 @@ charts:
 
 ---
 
+### 4. Kustomize Support
+
+Inspect the `helmCharts` entries of a `kustomization.yaml` directly, without hand-writing a batch manifest:
+
+```sh
+chart-release-inspector kustomize --file kustomization.yaml
+```
+
+`--file` also accepts a directory, resolving `kustomization.yaml`/`kustomization.yml`/`Kustomization` inside it. Only `name`, `version`, and `repo` are used to resolve chart updates — everything else (`namespace`, `releaseName`, `includeCRDs`, `valuesFile`, ...) is deployment configuration and is ignored.
+
+```yaml
+helmCharts:
+  - name: kserve-crd
+    version: v0.19.0
+    repo: oci://ghcr.io/kserve/charts
+    releaseName: kserve-operator
+    includeCRDs: true
+  - name: kserve-resources
+    version: v0.19.0
+    repo: oci://ghcr.io/kserve/charts
+    releaseName: kserve-operator
+    includeCRDs: false
+  - name: kserve-runtime-configs
+    version: v0.19.0
+    repo: oci://ghcr.io/kserve/charts
+    releaseName: kserve-operator
+    includeCRDs: false
+```
+
+---
+
 ## Automation Contract
 
 Use `--output json` and exit codes to integrate with GitOps pipelines:
