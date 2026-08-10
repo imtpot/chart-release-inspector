@@ -1,0 +1,7 @@
+charts:
+  - chart: oci://ghcr.io/kserve/charts/kserve-crd
+    version: v0.19.0
+  - chart: oci://ghcr.io/kserve/charts/kserve-resources
+    version: v0.19.0
+  - chart: oci://ghcr.io/kserve/charts/kserve-runtime-configs
+    version: v0.19.0
