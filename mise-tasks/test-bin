@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-#MISE description="Smoke test the built binary against the README and kserve examples"
-#MISE depends=["build"]
+#MISE description="Smoke test the built binary against the README, kserve, kustomize, and batch examples"
+#MISE depends=["test"]
 set -euo pipefail
 
 bin="./bin/chart-release-inspector"
@@ -30,5 +30,11 @@ run batch --file charts.example.yaml
 run inspect \
 	--chart oci://ghcr.io/kserve/charts/kserve-resources \
 	--version v0.19.0
+
+# kserve: same three charts as a batch manifest
+run batch --file mise-tasks/testdata/batch.yaml
+
+# kserve: same three charts via a kustomization.yaml's helmCharts
+run kustomize --file mise-tasks/testdata/kustomization.yaml
 
 echo "test-bin: all smoke checks passed"

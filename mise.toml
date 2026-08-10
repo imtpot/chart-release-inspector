@@ -7,4 +7,5 @@ run = "go build -o bin/chart-release-inspector ./cmd/chart-release-inspector"
 
 [tasks.test]
 description = "Run the Go test suite"
+depends = ["build"]
 run = "go test ./..."

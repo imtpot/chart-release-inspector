@@ -31,6 +31,8 @@ func main() {
 		inspect(os.Args[2:])
 	case "batch":
 		batch(os.Args[2:])
+	case "kustomize":
+		kustomize(os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	case "manifest":
@@ -146,6 +148,31 @@ func batch(args []string) {
 	runAndRender(manifest, c)
 }
 
+func kustomize(args []string) {
+	c := &Config{}
+	flags := flag.NewFlagSet("kustomize", flag.ExitOnError)
+	usageFor(flags, "Inspect every helmCharts entry in a kustomization.yaml; the global --values-diff and --changelog flags apply to all entries.")
+	flags.StringVar(&c.Filename, "file", "", "kustomization.yaml path (or directory containing one)")
+	c.RegisterShared(flags)
+	_ = flags.Parse(args)
+
+	if c.Filename == "" {
+		writeBatchError("--file is required")
+		return
+	}
+	if err := c.ParseShared(); err != nil {
+		writeBatchError(err.Error())
+		return
+	}
+
+	manifest, err := inspector.LoadKustomizationManifest(c.Filename)
+	if err != nil {
+		writeBatchError(err.Error())
+		return
+	}
+	runAndRender(manifest, c)
+}
+
 func runAndRender(manifest inspector.BatchManifest, c *Config) {
 	result := inspector.InspectBatch(context.Background(), manifest, c.ChangelogLimit, c.ValuesDiff, c.Changelog)
 	if c.Output == "json" {
@@ -202,6 +229,7 @@ func printUsage(writer *os.File) {
 	fmt.Fprintln(writer, "usage:")
 	fmt.Fprintln(writer, "  chart-release-inspector inspect [flags]             inspect a single chart upgrade")
 	fmt.Fprintln(writer, "  chart-release-inspector batch --file FILE [flags]    inspect every chart in a manifest")
+	fmt.Fprintln(writer, "  chart-release-inspector kustomize --file FILE [flags] inspect every helmCharts entry in a kustomization.yaml")
 	fmt.Fprintln(writer, "  chart-release-inspector manifest validate FILE       check a manifest file for structure errors")
 	fmt.Fprintln(writer, "  chart-release-inspector version                      print the version")
 }
