@@ -1,2 +1,10 @@
 [tools]
 "github:imtpot/chart-release-inspector" = "0.5.0"
+
+[tasks.build]
+description = "Build the chart-release-inspector binary into bin/"
+run = "go build -o bin/chart-release-inspector ./cmd/chart-release-inspector"
+
+[tasks.test]
+description = "Run the Go test suite"
+run = "go test ./..."
