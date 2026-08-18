@@ -8,7 +8,7 @@ require (
 	github.com/pterm/pterm v0.12.83
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/term v0.45.0
-	helm.sh/helm/v4 v4.2.3
+	helm.sh/helm/v4 v4.2.4
 	oras.land/oras-go/v2 v2.6.2
 	sigs.k8s.io/kustomize/api v0.21.1
 )
