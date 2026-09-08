@@ -146,6 +146,14 @@ helmCharts:
     includeCRDs: false
 ```
 
+Charts like these three often track the same upstream application release, so their changelogs come back byte-identical. Pass `--deduplicate` to collapse repeated changelogs into a single shared entry instead of repeating the full body per chart:
+
+```sh
+chart-release-inspector kustomize --file kustomization.yaml --deduplicate
+```
+
+In terminal output, only the first chart in a group prints the full changelog; the rest print a short cross-reference. In `--output json`, results that share a changelog get their `changelog` field cleared and a `changelog_group` id instead; the shared body is emitted once under the top-level `changelog_groups` array.
+
 ---
 
 ## Automation Contract

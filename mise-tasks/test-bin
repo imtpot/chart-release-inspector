@@ -37,4 +37,24 @@ run batch --file mise-tasks/testdata/batch.yaml
 # kserve: same three charts via a kustomization.yaml's helmCharts
 run kustomize --file mise-tasks/testdata/kustomization.yaml
 
+# deduplication: same three charts share one upstream release, so their
+# changelogs collapse into a single shared group instead of repeating it
+run batch --file mise-tasks/testdata/batch.yaml --deduplicate
+run kustomize --file mise-tasks/testdata/kustomization.yaml --deduplicate
+
+# deduplication: JSON output must carry changelog_groups and a
+# changelog_group id on each deduplicated result
+echo "==> $bin kustomize --file mise-tasks/testdata/kustomization.yaml --deduplicate --output json"
+json="$("$bin" kustomize --file mise-tasks/testdata/kustomization.yaml --deduplicate --output json)"
+echo "$json"
+echo
+if [ "$(echo "$json" | jq '.changelog_groups | length')" -lt 1 ]; then
+	echo "test-bin: expected at least one changelog_groups entry with --deduplicate" >&2
+	exit 1
+fi
+if [ "$(echo "$json" | jq '[.results[] | select(.changelog_group != null and .changelog_group != "")] | length')" -lt 2 ]; then
+	echo "test-bin: expected at least two results referencing a changelog_group" >&2
+	exit 1
+fi
+
 echo "test-bin: all smoke checks passed"

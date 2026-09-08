@@ -42,6 +42,19 @@ type Result struct {
 	ValuesDiffError    string           `json:"values_diff_error,omitempty"`
 	ChangelogError     string           `json:"changelog_error,omitempty"`
 	Changelog          []ChangelogEntry `json:"changelog"`
+	// ChangelogGroup references an entry in BatchResult.ChangelogGroups when
+	// --deduplicate collapsed this result's changelog into a shared group.
+	// When set, Changelog is left empty to avoid repeating the same content.
+	ChangelogGroup string `json:"changelog_group,omitempty"`
+}
+
+// ChangelogGroup holds changelog content shared by multiple chart results,
+// used by --deduplicate to avoid repeating identical upstream release notes
+// across charts that track the same application release.
+type ChangelogGroup struct {
+	ID        string           `json:"id"`
+	Charts    []string         `json:"charts"`
+	Changelog []ChangelogEntry `json:"changelog"`
 }
 
 type chartVersion struct {

@@ -164,6 +164,56 @@ func TestHumanPlainOutputHasNoAnsiWhenColorDisabled(t *testing.T) {
 	}
 }
 
+func TestHumanOutputRendersChangelogGroup(t *testing.T) {
+	var output bytes.Buffer
+	sharedEntries := []inspector.ChangelogEntry{{
+		Version: "1.1.0", URL: "https://example.test/releases/1.1.0",
+		BodyPreview: []string{"# Breaking change"},
+	}}
+	err := Human(&output, inspector.BatchResult{
+		Results: []inspector.Result{
+			{
+				Chart:              "chart-a",
+				SourceType:         "helm_repository",
+				ChartVersion:       "1.0.0",
+				TargetChartVersion: "1.1.0",
+				AppVersion:         "v1.0.0",
+				TargetAppVersion:   "v1.1.0",
+				Status:             inspector.StatusUpdate,
+				ChangelogGroup:     "cg-test",
+			},
+			{
+				Chart:              "chart-b",
+				SourceType:         "helm_repository",
+				ChartVersion:       "2.0.0",
+				TargetChartVersion: "2.1.0",
+				AppVersion:         "v1.0.0",
+				TargetAppVersion:   "v1.1.0",
+				Status:             inspector.StatusUpdate,
+				ChangelogGroup:     "cg-test",
+			},
+		},
+		ChangelogGroups: []inspector.ChangelogGroup{{
+			ID:        "cg-test",
+			Charts:    []string{"chart-a", "chart-b"},
+			Changelog: sharedEntries,
+		}},
+	}, Options{IncludeChangelog: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := output.String()
+	if strings.Count(text, "Breaking change") != 1 {
+		t.Fatalf("Human() should print the shared changelog body exactly once:\n%s", text)
+	}
+	if !strings.Contains(text, "shared with: chart-b") {
+		t.Fatalf("Human() is missing the shared-with note for chart-a:\n%s", text)
+	}
+	if !strings.Contains(text, "identical to chart-a's changelog above") {
+		t.Fatalf("Human() is missing the cross-reference for chart-b:\n%s", text)
+	}
+}
+
 func TestHumanOutputOmitsChangelogSectionWhenDisabled(t *testing.T) {
 	var output bytes.Buffer
 	err := Human(&output, inspector.BatchResult{
