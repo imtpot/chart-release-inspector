@@ -56,6 +56,7 @@ type Config struct {
 	Output         string
 	ColorMode      string
 	Color          bool
+	Deduplicate    bool
 }
 
 func (c *Config) RegisterShared(flags *flag.FlagSet) {
@@ -65,6 +66,7 @@ func (c *Config) RegisterShared(flags *flag.FlagSet) {
 	flags.BoolVar(&c.FailOnUpdate, "fail-on-update", false, "exit with code 10 when an update is available")
 	flags.StringVar(&c.Output, "output", "terminal", "output format: terminal or json")
 	flags.StringVar(&c.ColorMode, "color", "auto", "color mode: auto, always, or never")
+	flags.BoolVar(&c.Deduplicate, "deduplicate", false, "group results that share an identical changelog instead of repeating it per chart (default false)")
 }
 
 // usageFor sets a flag set's Usage to a tidy header followed by the standard
@@ -175,6 +177,9 @@ func kustomize(args []string) {
 
 func runAndRender(manifest inspector.BatchManifest, c *Config) {
 	result := inspector.InspectBatch(context.Background(), manifest, c.ChangelogLimit, c.ValuesDiff, c.Changelog)
+	if c.Deduplicate {
+		result = inspector.DeduplicateChangelogs(result)
+	}
 	if c.Output == "json" {
 		if err := writeJSON(result); err != nil {
 			fmt.Fprintln(os.Stderr, err)

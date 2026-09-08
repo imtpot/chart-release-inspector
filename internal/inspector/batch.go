@@ -30,6 +30,9 @@ type BatchResult struct {
 	Status        string   `json:"status"`
 	Error         string   `json:"error,omitempty"`
 	Results       []Result `json:"results"`
+	// ChangelogGroups holds changelog content shared by two or more results,
+	// populated only when --deduplicate is used. See DeduplicateChangelogs.
+	ChangelogGroups []ChangelogGroup `json:"changelog_groups,omitempty"`
 }
 
 // LoadBatchManifest reads and validates the batch manifest structure.

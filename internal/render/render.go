@@ -36,6 +36,10 @@ func Human(writer io.Writer, result inspector.BatchResult, options Options) erro
 	}
 
 	isSingle := len(result.Results) == 1
+	groups := make(map[string]inspector.ChangelogGroup, len(result.ChangelogGroups))
+	for _, group := range result.ChangelogGroups {
+		groups[group.ID] = group
+	}
 
 	for _, res := range result.Results {
 		if res.Error != "" {
@@ -43,7 +47,8 @@ func Human(writer io.Writer, result inspector.BatchResult, options Options) erro
 		}
 		if res.Status == inspector.StatusUpdate || isSingle {
 			hasDiff := res.ValuesDiffChanged != nil
-			hasChangelog := len(res.Changelog) > 0
+			group, isGrouped := groups[res.ChangelogGroup]
+			hasChangelog := len(res.Changelog) > 0 || isGrouped
 			showChangelog := options.IncludeChangelog
 
 			if hasDiff || (showChangelog && hasChangelog) || (showChangelog && isSingle) {
@@ -68,7 +73,12 @@ func Human(writer io.Writer, result inspector.BatchResult, options Options) erro
 						section = pterm.NewStyle(pterm.Bold, pterm.FgLightCyan).Sprint(section)
 					}
 					fmt.Fprintln(writer, section)
-					if hasChangelog {
+					switch {
+					case isGrouped:
+						if err := renderGroupedChangelog(writer, res.Chart, group, options); err != nil {
+							return err
+						}
+					case hasChangelog:
 						for i, entry := range res.Changelog {
 							if i > 0 {
 								fmt.Fprintln(writer)
@@ -77,13 +87,13 @@ func Human(writer io.Writer, result inspector.BatchResult, options Options) erro
 								return err
 							}
 						}
-					} else if res.ChangelogError == "" {
+					case res.ChangelogError == "":
 						message := "No changelog found."
 						if options.Color {
 							message = pterm.FgGray.Sprint(message)
 						}
 						fmt.Fprintln(writer, message)
-					} else {
+					default:
 						message := "No changelog found: " + res.ChangelogError
 						if options.Color {
 							message = pterm.FgYellow.Sprint(message)
@@ -95,6 +105,36 @@ func Human(writer io.Writer, result inspector.BatchResult, options Options) erro
 					fmt.Fprintln(writer)
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// renderGroupedChangelog prints the shared changelog once, for the first
+// chart in the group, and a short cross-reference for the rest — avoiding
+// repeating the same release notes for every chart that shares them.
+func renderGroupedChangelog(writer io.Writer, chart string, group inspector.ChangelogGroup, options Options) error {
+	if len(group.Charts) == 0 || chart != group.Charts[0] {
+		reference := "identical to " + group.Charts[0] + "'s changelog above"
+		if options.Color {
+			reference = pterm.FgGray.Sprint(reference)
+		}
+		fmt.Fprintln(writer, reference)
+		return nil
+	}
+
+	others := group.Charts[1:]
+	note := fmt.Sprintf("(shared with: %s)", strings.Join(others, ", "))
+	if options.Color {
+		note = pterm.FgGray.Sprint(note)
+	}
+	fmt.Fprintln(writer, note)
+	for i, entry := range group.Changelog {
+		if i > 0 {
+			fmt.Fprintln(writer)
+		}
+		if err := renderEntry(writer, entry, options); err != nil {
+			return err
 		}
 	}
 	return nil
