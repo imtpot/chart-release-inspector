@@ -7,7 +7,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/pterm/pterm v0.12.83
 	go.yaml.in/yaml/v3 v3.0.4
-	golang.org/x/term v0.45.0
+	golang.org/x/term v0.46.0
 	helm.sh/helm/v4 v4.2.3
 	oras.land/oras-go/v2 v2.6.2
 	sigs.k8s.io/kustomize/api v0.21.1
@@ -70,7 +70,7 @@ require (
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
